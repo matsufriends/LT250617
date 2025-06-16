@@ -137,6 +137,7 @@ WIKIPEDIA_SUMMARY_LIMIT = config.collector.wikipedia_summary_limit
 WIKIPEDIA_FALLBACK_LIMIT = config.collector.wikipedia_fallback_limit
 MAX_KEY_INFORMATION = config.processing.max_key_information
 MAX_SAMPLE_PHRASES_DISPLAY = config.processing.max_sample_phrases_display
+SAMPLE_PHRASES_MAX = config.processing.sample_phrases_max
 
 
 def get_search_patterns(name: str) -> List[str]:

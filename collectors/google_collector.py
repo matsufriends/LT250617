@@ -285,9 +285,9 @@ class GoogleCollector(SearchEngineCollector):
                         safe='off',  # セーフサーチオフ
                         country='jp'  # 日本からの検索を明示
                     ):
-                        # 検索時間のチェック（90秒でタイムアウト）
-                        if time.time() - start_search_time > 90:
-                            print(f"    ⚠️ 検索処理がタイムアウト（90秒）のため中断します")
+                        # 検索時間のチェック（60秒でタイムアウト）
+                        if time.time() - start_search_time > 60:
+                            print(f"    ⚠️ 検索処理がタイムアウト（60秒）のため中断します")
                             search_timeout = True
                             break
                         search_urls.append(url)
@@ -305,7 +305,7 @@ class GoogleCollector(SearchEngineCollector):
                     if search_timeout:
                         print(f"    ⚠️ 検索がタイムアウトしました。取得済みURL: {len(search_urls)}件")
                         if logger:
-                            logger.log_error("google_search_timeout", "検索処理が90秒でタイムアウト", {
+                            logger.log_error("google_search_timeout", "検索処理が60秒でタイムアウト", {
                                 "search_query": search_query,
                                 "urls_collected": len(search_urls)
                             })

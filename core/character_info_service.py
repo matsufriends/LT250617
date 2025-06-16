@@ -90,11 +90,11 @@ class CharacterInfoService:
                 }
             
             try:
-                # Web検索情報（十分な時間を確保）
-                character_info["google_search_results"] = web_search_future.result(timeout=120)
+                # Web検索情報（適切な時間で制限）
+                character_info["google_search_results"] = web_search_future.result(timeout=90)
                 print("✅ Web検索情報収集完了")
             except concurrent.futures.TimeoutError:
-                print("⚠️ Web検索情報収集がタイムアウトしました（120秒）")
+                print("⚠️ Web検索情報収集がタイムアウトしました（90秒）")
                 # タイムアウト時はキャンセルを試行
                 try:
                     web_search_future.cancel()
@@ -102,7 +102,7 @@ class CharacterInfoService:
                     pass
                 character_info["google_search_results"] = {
                     "found": False,
-                    "error": "タイムアウト（120秒）",
+                    "error": "タイムアウト（90秒）",
                     "results": [],
                     "total_results": 0
                 }
