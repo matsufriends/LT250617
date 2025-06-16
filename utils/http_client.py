@@ -7,13 +7,19 @@ import time
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse
 
-from config import config
+from config import (DEFAULT_DELAY, DEFAULT_USER_AGENT, HTTP_DEFAULT_DELAY,
+                    HTTP_DEFAULT_TIMEOUT, HTTP_DEFAULT_MAX_RETRIES,
+                    HTTP_RETRY_WAIT_MULTIPLIER, HTTP_TIMEOUT_WAIT_MULTIPLIER,
+                    HTTP_CONNECTION_ERROR_WAIT_MULTIPLIER,
+                    HTTP_SKIP_RETRY_STATUS_CODES, HTTP_STATUS_NOT_FOUND,
+                    HTTP_STATUS_FORBIDDEN, HTTP_STATUS_NOT_ACCEPTABLE,
+                    HTTP_STATUS_GONE, HTTP_STATUS_SERVICE_UNAVAILABLE)
 
 
 class BaseHTTPClient:
     """HTTP リクエスト用の基底クラス"""
     
-    def __init__(self, delay: float = 2.0, timeout: int = 15):
+    def __init__(self, delay: float = None, timeout: int = None):
         """
         初期化
         
@@ -21,13 +27,13 @@ class BaseHTTPClient:
             delay: リクエスト間の待機時間（秒）
             timeout: リクエストタイムアウト（秒）
         """
-        self.delay = delay
-        self.timeout = timeout
+        self.delay = delay if delay is not None else HTTP_DEFAULT_DELAY
+        self.timeout = timeout if timeout is not None else HTTP_DEFAULT_TIMEOUT
         self.session = requests.Session()
         
         # 標準的なHTTPヘッダーを設定
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': DEFAULT_USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -36,7 +42,7 @@ class BaseHTTPClient:
             'Upgrade-Insecure-Requests': '1'
         })
     
-    def get(self, url: str, params: Optional[Dict[str, Any]] = None, max_retries: int = 2, **kwargs) -> requests.Response:
+    def get(self, url: str, params: Optional[Dict[str, Any]] = None, max_retries: int = None, **kwargs) -> requests.Response:
         """
         リトライ機能付きGETリクエストを実行
         
@@ -57,6 +63,9 @@ class BaseHTTPClient:
         
         last_exception = None
         
+        if max_retries is None:
+            max_retries = HTTP_DEFAULT_MAX_RETRIES
+        
         for attempt in range(max_retries + 1):
             try:
                 response = self.session.get(url, params=params, **kwargs)
@@ -73,12 +82,12 @@ class BaseHTTPClient:
                 status_code = http_err.response.status_code if http_err.response else 'unknown'
                 
                 # 特定のHTTPエラーは即座にスキップ（リトライしない）
-                if status_code in [404, 403, 406, 410, 503]:
+                if status_code in HTTP_SKIP_RETRY_STATUS_CODES:
                     raise http_err
                 
                 # 他のHTTPエラーはリトライ
                 if attempt < max_retries:
-                    wait_time = (attempt + 1) * 2
+                    wait_time = (attempt + 1) * HTTP_RETRY_WAIT_MULTIPLIER
                     print(f"    HTTP {status_code}エラー - {wait_time}秒後にリトライ (試行 {attempt + 1}/{max_retries + 1})")
                     time.sleep(wait_time)
                     continue
@@ -88,7 +97,7 @@ class BaseHTTPClient:
             except requests.exceptions.Timeout as timeout_err:
                 last_exception = timeout_err
                 if attempt < max_retries:
-                    wait_time = (attempt + 1) * 3
+                    wait_time = (attempt + 1) * HTTP_TIMEOUT_WAIT_MULTIPLIER
                     print(f"    タイムアウト - {wait_time}秒後にリトライ (試行 {attempt + 1}/{max_retries + 1})")
                     time.sleep(wait_time)
                     continue
@@ -98,7 +107,7 @@ class BaseHTTPClient:
             except requests.exceptions.ConnectionError as conn_err:
                 last_exception = conn_err
                 if attempt < max_retries:
-                    wait_time = (attempt + 1) * 4
+                    wait_time = (attempt + 1) * HTTP_CONNECTION_ERROR_WAIT_MULTIPLIER
                     print(f"    接続エラー - {wait_time}秒後にリトライ (試行 {attempt + 1}/{max_retries + 1})")
                     time.sleep(wait_time)
                     continue
@@ -108,7 +117,7 @@ class BaseHTTPClient:
             except requests.exceptions.RequestException as req_err:
                 last_exception = req_err
                 if attempt < max_retries:
-                    wait_time = (attempt + 1) * 2
+                    wait_time = (attempt + 1) * HTTP_RETRY_WAIT_MULTIPLIER
                     print(f"    リクエストエラー - {wait_time}秒後にリトライ (試行 {attempt + 1}/{max_retries + 1})")
                     time.sleep(wait_time)
                     continue
@@ -162,7 +171,7 @@ class SearchHTTPClient(BaseHTTPClient):
         Args:
             delay: リクエスト間の待機時間（デフォルトは設定値）
         """
-        super().__init__(delay or config.collector.default_delay, **kwargs)
+        super().__init__(delay or DEFAULT_DELAY, **kwargs)
         
         # 検索エンジン用のヘッダーに調整
         self.session.headers.update({

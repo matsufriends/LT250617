@@ -4,7 +4,21 @@
 
 import openai
 from typing import Dict, Any
-from config import config
+from dotenv import load_dotenv
+from config import (
+    OPENAI_MODEL, OPENAI_MAX_TOKENS, OPENAI_TEMPERATURE,
+    MAX_KEY_INFORMATION, WIKIPEDIA_SUMMARY_LIMIT, MAX_SAMPLE_PHRASES_DISPLAY,
+    WIKIPEDIA_FALLBACK_LIMIT, PROMPT_MAX_WEB_SPEECH_PATTERNS,
+    PROMPT_TOP_WEB_RESULTS_FOR_RAW, PROMPT_CONTENT_EXCERPT_LIMIT,
+    PROMPT_RAW_CONTENT_DISPLAY_LIMIT, PROMPT_FALLBACK_PATTERN_LIMIT,
+    PROMPT_FALLBACK_PHRASE_LIMIT, PROMPT_INTRODUCTION_CHAR_LIMIT,
+    PROMPT_INTRODUCTION_MAX_TOKENS, PROMPT_INTRODUCTION_TEMPERATURE,
+    PROMPT_POLICY_SAFE_TEMPERATURE, SAMPLE_QUALITY_MAX_LENGTH,
+    LIST_ITEM_MAX_NUMBER
+)
+
+# .envファイルから環境変数を読み込み
+load_dotenv()
 
 
 class PromptGenerator:
@@ -19,7 +33,7 @@ class PromptGenerator:
             model: 使用するモデル名
         """
         self.client = openai.OpenAI(api_key=api_key)
-        self.model = model or config.api.openai_model
+        self.model = model or OPENAI_MODEL
     
     def generate_voice_prompt(self, character_info: Dict[str, Any], logger=None) -> str:
         """
@@ -32,14 +46,18 @@ class PromptGenerator:
             生成されたプロンプト
         """
         try:
+            print("\n🤖 プロンプト生成を開始...")
+            
             # 情報を整理
+            print("  収集した情報を整理中...")
             organized_info = self._organize_information(character_info)
             
             # ChatGPTに送信するプロンプトを構築
+            print("  プロンプトを構築中...")
             system_prompt = self._build_system_prompt()
             user_prompt = self._build_user_prompt(organized_info)
             
-            print("ChatGPT APIにリクエスト送信中...")
+            print(f"  ChatGPT API ({self.model}) にリクエスト送信中...")
             
             # ChatGPT APIを呼び出し
             response = self.client.chat.completions.create(
@@ -48,18 +66,22 @@ class PromptGenerator:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=config.api.openai_max_tokens,
-                temperature=config.api.openai_temperature
+                max_tokens=OPENAI_MAX_TOKENS,
+                temperature=OPENAI_TEMPERATURE
             )
             
             generated_prompt = response.choices[0].message.content.strip()
             print("✅ ChatGPT APIからレスポンスを受信しました")
             
             # 生成されたプロンプトを使用してキャラクターの自己紹介を生成
+            print("\n  🎭 キャラクター自己紹介を生成中...")
             character_introduction = self._generate_character_introduction(generated_prompt, character_info.get("name", "unknown"))
             
             # コンテンツポリシー対応版プロンプトを生成
+            print("  🛡️  ポリシー対応版プロンプトを生成中...")
             policy_safe_prompt = self._generate_policy_safe_prompt(generated_prompt, character_info.get("name", "unknown"))
+            
+            print("✅ プロンプト生成完了！")
             
             # APIやり取りを結果に含める
             return {
@@ -134,7 +156,7 @@ class PromptGenerator:
             if wiki_info.get("title"):
                 organized["key_information"].append(f"正式名称: {wiki_info['title']}")
             if wiki_info.get("categories"):
-                categories = ", ".join(wiki_info["categories"][:config.processing.max_key_information])
+                categories = ", ".join(wiki_info["categories"][:MAX_KEY_INFORMATION])
                 organized["key_information"].append(f"カテゴリ: {categories}")
         
         # Google検索結果の整理
@@ -144,23 +166,23 @@ class PromptGenerator:
             
             # 各検索結果から重要な情報を抽出
             web_speech_patterns = []
-            for result in google_info["results"][:config.processing.max_key_information]:  # 上位件数のみ
+            for result in google_info["results"][:MAX_KEY_INFORMATION]:  # 上位件数のみ
                 if result.get("title"):
-                    organized["key_information"].append(f"関連情報: {result['title'][:100]}")
+                    organized["key_information"].append(f"関連情報: {result['title'][:SAMPLE_QUALITY_MAX_LENGTH]}")
                 
                 # Webページから抽出されたスピーチパターンを収集
                 if result.get("speech_patterns"):
                     web_speech_patterns.extend(result["speech_patterns"])
             
             # Web検索から得られたスピーチパターンを保存
-            organized["web_speech_patterns"] = web_speech_patterns[:10]  # 最大10個
+            organized["web_speech_patterns"] = web_speech_patterns[:PROMPT_MAX_WEB_SPEECH_PATTERNS]  # 最大数
             
             # 生のテキストデータも保存（絵文字保持のため）
             raw_content = []
-            for result in google_info["results"][:3]:  # 上位3件の生テキスト
+            for result in google_info["results"][:PROMPT_TOP_WEB_RESULTS_FOR_RAW]:  # 上位件数の生テキスト
                 if result.get("content"):
-                    # 1000文字以内の抜粋
-                    content_excerpt = result["content"][:1000]
+                    # 指定文字数以内の抜粋
+                    content_excerpt = result["content"][:PROMPT_CONTENT_EXCERPT_LIMIT]
                     if content_excerpt.strip():
                         raw_content.append(content_excerpt)
             organized["raw_web_content"] = raw_content
@@ -234,14 +256,14 @@ class PromptGenerator:
         if organized_info["wikipedia_found"]:
             prompt_parts.extend([
                 f"■ 基本情報（Wikipedia）",
-                organized_info["wikipedia_summary"][:config.collector.wikipedia_summary_limit] + "...",
+                organized_info["wikipedia_summary"][:WIKIPEDIA_SUMMARY_LIMIT] + "...",
                 ""
             ])
         
         # 重要な情報
         if organized_info["key_information"]:
             prompt_parts.append("■ 追加の基本情報")
-            for info in organized_info["key_information"][:config.processing.max_key_information]:  # 重要な件数のみ
+            for info in organized_info["key_information"][:MAX_KEY_INFORMATION]:  # 重要な件数のみ
                 prompt_parts.append(f"- {info}")
             prompt_parts.append("")
         
@@ -262,7 +284,7 @@ class PromptGenerator:
                 f"■ 関連Webページ内容（抜粋）",
                 "以下は実際のWebページから取得した生のテキストです："
             ])
-            for i, content in enumerate(organized_info["raw_web_content"][:2], 1):
+            for i, content in enumerate(organized_info["raw_web_content"][:PROMPT_RAW_CONTENT_DISPLAY_LIMIT], 1):
                 if content.strip():
                     prompt_parts.append(f"【資料{i}】")
                     prompt_parts.append(content)
@@ -287,7 +309,7 @@ class PromptGenerator:
                 f"■ 実際の発言サンプル（YouTube動画より）",
                 "以下は動画から抽出された実際の話し方です："
             ])
-            for phrase in organized_info["sample_phrases"][:config.processing.max_sample_phrases_display]:  # サンプル数は設定から
+            for phrase in organized_info["sample_phrases"][:MAX_SAMPLE_PHRASES_DISPLAY]:  # サンプル数は設定から
                 if phrase.strip():
                     prompt_parts.append(f"「{phrase}」")
             prompt_parts.append("")
@@ -302,11 +324,11 @@ class PromptGenerator:
             "3. **話し方のパターン**: 特徴的な表現の適切な使用",
             "4. **対人関係**: 相手との関係性の明確化",
             "5. **性格・価値観**: 思考パターンの正確な表現",
-            "6. **具体的表現例**: 特徴的な決まり文句を10個程度",
+            f"6. **具体的表現例**: 特徴的な決まり文句を{PROMPT_MAX_WEB_SPEECH_PATTERNS}個程度",
             "7. **【回答スタイル】**: エンタメ重視・キャラクター性優先の回答方法",
             "8. **【キャラクターガイドライン】**: 一貫性を保つ詳細指示",
             "9. **【私の役割】**: 相手役の設定も明確に定義",
-            "10. **注意事項**: エンタメ重視・キャラクター性優先の指示",
+            f"{LIST_ITEM_MAX_NUMBER}. **注意事項**: エンタメ重視・キャラクター性優先の指示",
             "",
             "【分析観点（エンタメ重視）】",
             f"- 収集データから対象キャラクターの最も特徴的な語尾や表現パターンは何か？",
@@ -387,7 +409,7 @@ class PromptGenerator:
         if organized_info["wikipedia_found"]:
             fallback_parts.extend([
                 "## 基本情報",
-                organized_info["wikipedia_summary"][:config.collector.wikipedia_fallback_limit] + "...",
+                organized_info["wikipedia_summary"][:WIKIPEDIA_FALLBACK_LIMIT] + "...",
                 ""
             ])
         
@@ -397,7 +419,7 @@ class PromptGenerator:
                 "## 口調・語尾特徴（Web検索より）",
                 "以下の特徴を参考にしてください："
             ])
-            for pattern in organized_info["web_speech_patterns"][:5]:
+            for pattern in organized_info["web_speech_patterns"][:PROMPT_FALLBACK_PATTERN_LIMIT]:
                 if pattern.strip():
                     fallback_parts.append(f"- {pattern}")
             fallback_parts.append("")
@@ -408,7 +430,7 @@ class PromptGenerator:
                 "## 実際の発言例（YouTube動画より）",
                 "以下の話し方を参考にしてください："
             ])
-            for phrase in organized_info["sample_phrases"][:5]:
+            for phrase in organized_info["sample_phrases"][:PROMPT_FALLBACK_PHRASE_LIMIT]:
                 if phrase.strip():
                     fallback_parts.append(f"- 「{phrase}」")
             fallback_parts.append("")
@@ -473,7 +495,7 @@ class PromptGenerator:
 
 【自己紹介の指示（エンタメ重視）】
 上記のキャラクター設定に完全に従って、そのキャラクターとして自己紹介をしてください。
-- 200文字程度の自己紹介
+- {PROMPT_INTRODUCTION_CHAR_LIMIT}文字程度の自己紹介
 - そのキャラクターらしい口調・語尾・表現を魅力的に使用
 - 一人称や特徴的な表現を面白く含める
 - キャラクター性をエンタメ重視で表現
@@ -488,8 +510,8 @@ class PromptGenerator:
                 messages=[
                     {"role": "user", "content": introduction_prompt}
                 ],
-                max_tokens=300,
-                temperature=0.8  # 少し創造性を持たせる
+                max_tokens=PROMPT_INTRODUCTION_MAX_TOKENS,
+                temperature=PROMPT_INTRODUCTION_TEMPERATURE  # 少し創造性を持たせる
             )
             
             introduction_text = response.choices[0].message.content.strip()
@@ -569,8 +591,8 @@ class PromptGenerator:
                 messages=[
                     {"role": "user", "content": safety_prompt}
                 ],
-                max_tokens=config.api.openai_max_tokens,
-                temperature=0.3  # 安全側に振る
+                max_tokens=OPENAI_MAX_TOKENS,
+                temperature=PROMPT_POLICY_SAFE_TEMPERATURE  # 安全側に振る
             )
             
             safe_prompt = response.choices[0].message.content.strip()

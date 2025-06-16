@@ -8,7 +8,18 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from typing import List, Dict, Any
 from urllib.parse import urlparse, parse_qs
-from config import config
+from config import (
+    YOUTUBE_MAX_VIDEOS, YOUTUBE_MAX_TRANSCRIPTS, YOUTUBE_TRANSCRIPT_LIMIT,
+    SAMPLE_PHRASES_MAX, SAMPLE_PHRASE_MIN_LENGTH, SAMPLE_PHRASE_MAX_LENGTH,
+    SAMPLE_QUALITY_MIN_LENGTH, SAMPLE_QUALITY_MAX_LENGTH,
+    CHATGPT_FILTER_TEXT_LIMIT, OPENAI_MODEL, OPENAI_FILTER_MAX_TOKENS,
+    OPENAI_FILTER_TEMPERATURE, get_search_patterns,
+    YOUTUBE_VIDEO_ID_DISPLAY_LENGTH, YOUTUBE_PREVIEW_TEXT_LENGTH,
+    YOUTUBE_SAMPLE_DISPLAY_LIMIT, YOUTUBE_MIN_SENTENCE_LENGTH,
+    YOUTUBE_MAX_SINGLE_CHAR_LENGTH, YOUTUBE_MAX_PERIOD_COUNT,
+    YOUTUBE_FILTER_PHRASE_LIMIT, YOUTUBE_ANALYSIS_TEXT_LIMIT,
+    YOUTUBE_ANALYSIS_MAX_TOKENS, REGEX_JAPANESE_CHAR_MIN, REGEX_JAPANESE_CHAR_MAX
+)
 
 
 class YouTubeCollector:
@@ -31,7 +42,7 @@ class YouTubeCollector:
         """
         try:
             if max_videos is None:
-                max_videos = config.search.youtube_max_videos
+                max_videos = YOUTUBE_MAX_VIDEOS
                 
             if not youtube_urls:
                 return {
@@ -42,10 +53,11 @@ class YouTubeCollector:
                     "sample_phrases": []
                 }
             
-            print(f"  {len(youtube_urls)}個の動画から字幕を収集中...")
+            print(f"  {len(youtube_urls)}個の動画から字幕を収集中（最大{max_videos}動画）...")
             
             transcripts = []
             all_text = []
+            total_videos = min(len(youtube_urls), max_videos)
             
             for i, url in enumerate(youtube_urls[:max_videos]):
                 video_id = self._extract_video_id(url)
@@ -53,24 +65,26 @@ class YouTubeCollector:
                     print(f"  動画{i+1}: 無効なURL - {url}")
                     continue
                 
-                print(f"  動画{i+1} (ID: {video_id[:11]}): 字幕取得中...")
+                print(f"  動画{i+1}/{total_videos} (ID: {video_id[:YOUTUBE_VIDEO_ID_DISPLAY_LENGTH]}): 字幕取得中...")
                 transcript_info = self._get_video_transcript(video_id)
                 
                 if transcript_info["found"]:
                     transcripts.append(transcript_info)
                     all_text.append(transcript_info["text"])
                     # 取得したテキストの一部を表示（デバッグ用）
-                    preview = transcript_info["text"][:100].replace('\n', ' ')
-                    print(f"  ✅ 字幕取得成功 ({transcript_info['word_count']}語) - プレビュー: {preview}...")
+                    preview = transcript_info["text"][:YOUTUBE_PREVIEW_TEXT_LENGTH].replace('\n', ' ')
+                    print(f"    ✅ 字幕取得成功 ({transcript_info['word_count']}語, {transcript_info['language']})")
+                    print(f"    プレビュー: {preview}...")
                 else:
-                    print(f"  ❌ 字幕取得失敗: {transcript_info['error']}")
+                    print(f"    ❌ 字幕取得失敗: {transcript_info['error']}")
                 
                 # 字幕が十分取得できたら早期終了
-                if len(transcripts) >= config.search.youtube_max_transcripts:
+                if len(transcripts) >= YOUTUBE_MAX_TRANSCRIPTS:
                     print(f"  十分な字幕データを取得しました ({len(transcripts)}動画)")
                     break
             
             # サンプルフレーズを抽出
+            print(f"\n  📝 サンプルフレーズ抽出中...")
             sample_phrases = self._extract_sample_phrases(all_text)
             
             # サンプル品質チェック
@@ -79,14 +93,15 @@ class YouTubeCollector:
             # 検索パターン相当の言語特徴抽出（API keyがある場合）
             pattern_analysis = {}
             if api_key and all_text:
+                print(f"  🤔 言語パターン分析中 (ChatGPT API)...")
                 pattern_analysis = self._analyze_speech_patterns(all_text, character_info.get("name", ""), api_key)
             
             print(f"  📝 サンプルフレーズ抽出: {len(sample_phrases)}個 → 品質チェック後: {len(quality_checked_phrases)}個")
             
             # デバッグ用：抽出されたフレーズの一部を表示
             if quality_checked_phrases:
-                print("  📋 抽出されたサンプル（最初の5個）:")
-                for i, phrase in enumerate(quality_checked_phrases[:5]):
+                print(f"  📋 抽出されたサンプル（最初の{YOUTUBE_SAMPLE_DISPLAY_LIMIT}個）:")
+                for i, phrase in enumerate(quality_checked_phrases[:YOUTUBE_SAMPLE_DISPLAY_LIMIT]):
                     print(f"    {i+1}. {phrase}")
             else:
                 print("  ⚠️ サンプルフレーズが抽出されませんでした")
@@ -200,7 +215,7 @@ class YouTubeCollector:
             full_text = ' '.join(text_parts)
             
             # テキストを制限
-            limited_text = full_text[:config.search.youtube_transcript_limit] if full_text else ""
+            limited_text = full_text[:YOUTUBE_TRANSCRIPT_LIMIT] if full_text else ""
             
             return {
                 "found": True,
@@ -234,7 +249,7 @@ class YouTubeCollector:
         """
         try:
             if max_phrases is None:
-                max_phrases = config.processing.sample_phrases_max
+                max_phrases = SAMPLE_PHRASES_MAX
                 
             all_text = ' '.join(text_list)
             
@@ -253,9 +268,9 @@ class YouTubeCollector:
                 sentence = sentence.strip()
                 
                 # 基本的なフィルタリングのみ（特徴的パターンによる優先順位付けは廃止）
-                if (config.processing.sample_phrase_min_length <= len(sentence) <= config.processing.sample_phrase_max_length and 
+                if (SAMPLE_PHRASE_MIN_LENGTH <= len(sentence) <= SAMPLE_PHRASE_MAX_LENGTH and 
                     not re.match(r'^[音楽拍手効果音]+', sentence) and
-                    not re.match(r'^[あ-ん]{1,3}$', sentence) and
+                    not re.match(rf'^[あ-ん]{{{REGEX_JAPANESE_CHAR_MIN},{REGEX_JAPANESE_CHAR_MAX}}}$', sentence) and
                     sentence not in ['', ' ', 'うん', 'そう', 'はい', 'えー', 'あー']):
                     
                     filtered_sentences.append(sentence)
@@ -266,7 +281,7 @@ class YouTubeCollector:
             for sentence in filtered_sentences:
                 # 正規化して重複チェック
                 normalized = re.sub(r'\s+', '', sentence.lower())  # 空白除去＋小文字化
-                if normalized not in seen and len(normalized) > config.processing.sample_phrase_min_length:
+                if normalized not in seen and len(normalized) > SAMPLE_PHRASE_MIN_LENGTH:
                     unique_sentences.append(sentence)
                     seen.add(normalized)
             
@@ -298,11 +313,11 @@ class YouTubeCollector:
                 phrase = phrase.strip()
                 
                 # 基本的な品質チェック
-                if (len(phrase) < config.processing.sample_quality_min_length or len(phrase) > config.processing.sample_quality_max_length or
+                if (len(phrase) < SAMPLE_QUALITY_MIN_LENGTH or len(phrase) > SAMPLE_QUALITY_MAX_LENGTH or
                     phrase.count('詰んだろうが') > 0 or  # 明らかに間違った文を除外
                     phrase.count('教会の常識') > 0 or
                     re.match(r'^[同じ文章の繰り返し]', phrase) or
-                    phrase.count('。') > 3):  # 複数文が混在している場合
+                    phrase.count('。') > YOUTUBE_MAX_PERIOD_COUNT):  # 複数文が混在している場合
                     continue
                 
                 # 意味のある文かどうかチェック
@@ -338,8 +353,8 @@ class YouTubeCollector:
             client = openai.OpenAI(api_key=api_key)
             
             all_text = ' '.join(text_list)
-            if len(all_text) > config.processing.chatgpt_filter_text_limit:  # テキストが長すぎる場合は切り詰め
-                all_text = all_text[:config.processing.chatgpt_filter_text_limit]
+            if len(all_text) > CHATGPT_FILTER_TEXT_LIMIT:  # テキストが長すぎる場合は切り詰め
+                all_text = all_text[:CHATGPT_FILTER_TEXT_LIMIT]
             
             print(f"  ChatGPT APIで{character_name}の発言を特定中...")
             
@@ -368,7 +383,7 @@ class YouTubeCollector:
 - 技術的な説明や実況コメント
 
 【出力要求】
-- {character_name}らしい発言のみ10個以内
+- {character_name}らしい発言のみ{YOUTUBE_FILTER_PHRASE_LIMIT}個以内
 - 各発言を改行で区切る
 - 重複は避ける
 - 不確実な場合は除外
@@ -378,13 +393,13 @@ class YouTubeCollector:
 """
             
             response = client.chat.completions.create(
-                model=config.api.openai_model,
+                model=OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=config.api.openai_filter_max_tokens,
-                temperature=config.api.openai_filter_temperature
+                max_tokens=OPENAI_FILTER_MAX_TOKENS,
+                temperature=OPENAI_FILTER_TEMPERATURE
             )
             
             filtered_text = response.choices[0].message.content.strip()
@@ -394,12 +409,12 @@ class YouTubeCollector:
             
             # APIのやり取りも返す
             return {
-                "filtered_phrases": filtered_phrases[:10],
+                "filtered_phrases": filtered_phrases[:YOUTUBE_FILTER_PHRASE_LIMIT],
                 "api_interaction": {
                     "system_prompt": system_prompt,
                     "user_prompt": user_prompt,
                     "response": filtered_text,
-                    "model": config.api.openai_model,
+                    "model": OPENAI_MODEL,
                     "character_name": character_name
                 }
             }
@@ -452,14 +467,14 @@ class YouTubeCollector:
                 return {}
             
             # テキストが長すぎる場合は切り詰め
-            if len(text) > 3000:
-                text = text[:3000]
+            if len(text) > YOUTUBE_ANALYSIS_TEXT_LIMIT:
+                text = text[:YOUTUBE_ANALYSIS_TEXT_LIMIT]
             
             import openai
             client = openai.OpenAI(api_key=api_key)
             
             # 検索パターンを取得
-            search_patterns = config.search.get_search_patterns(character_name)
+            search_patterns = get_search_patterns(character_name)
             pattern_descriptions = [
                 "人物プロフィール・基本情報",
                 "名台詞・決まり文句",
@@ -520,13 +535,13 @@ class YouTubeCollector:
 {text}"""
             
             response = client.chat.completions.create(
-                model=config.api.openai_model,
+                model=OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=800,
-                temperature=0.1
+                max_tokens=YOUTUBE_ANALYSIS_MAX_TOKENS,
+                temperature=OPENAI_FILTER_TEMPERATURE
             )
             
             result_text = response.choices[0].message.content.strip()

@@ -3,14 +3,18 @@
 """
 
 import time
-import concurrent.futures
 from typing import Dict, Any, Optional
 
 from core.interfaces import BaseCollector
 from core.collector_factory import CollectorFactory, SearchEngineType
 from core.exceptions import CollectorError
 from utils.execution_logger import ExecutionLogger
-from config import config
+from config import (
+    YOUTUBE_MAX_VIDEOS, GOOGLE_API_KEY, GOOGLE_CX,
+    CONCURRENT_WORKERS, COLLECTION_TIMEOUT_TOTAL,
+    COLLECTION_TIMEOUT_WIKIPEDIA, COLLECTION_TIMEOUT_WEB_SEARCH,
+    COLLECTION_TIMEOUT_YOUTUBE
+)
 
 
 class CharacterInfoService:
@@ -28,8 +32,7 @@ class CharacterInfoService:
         use_google: bool = True,
         use_duckduckgo: bool = False,
         use_bing: bool = False,
-        use_chatgpt_search: bool = False,
-        use_realtime_display: bool = True
+        use_chatgpt_search: bool = False
     ) -> Dict[str, Any]:
         """
         キャラクター情報を包括的に収集
@@ -49,198 +52,69 @@ class CharacterInfoService:
         self.logger = logger
         character_info = {"name": name}
         
-        # リアルタイム表示の設定
-        console_display = None
-        progress_reporter = None
+        print("📚 情報収集中... (順次実行)")
         
-        if use_realtime_display:
-            from utils.console_display import ConsoleDisplay, ProgressReporter
-            console_display = ConsoleDisplay()
-            progress_reporter = ProgressReporter(console_display)
-            console_display.start(name)
+        # 順次実行でWikipedia、Web検索、YouTube情報収集を実行
+        print("\n  📋 タスクを順次実行:")
+        
+        # 1. Wikipedia情報収集
+        print("\n  1️⃣ Wikipedia情報収集を開始...")
+        character_info["wikipedia_info"] = self._collect_wikipedia_info(name)
+        print("✅ Wikipedia情報収集完了")
+        # 即座にログを保存
+        if self.logger:
+            self.logger._save_log()
+        
+        # 2. Web検索情報収集  
+        print("\n  2️⃣ Web検索情報収集を開始...")
+        character_info["google_search_results"] = self._collect_web_search_info(
+            name, use_google, use_duckduckgo, use_bing, use_chatgpt_search
+        )
+        print("✅ Web検索情報収集完了")
+        # 即座にログを保存
+        if self.logger:
+            self.logger._save_log()
+        
+        # 3. YouTube情報収集
+        if use_youtube:
+            print("\n  3️⃣ YouTube情報収集を開始...")
+            character_info["youtube_transcripts"] = self._collect_youtube_info(
+                name, use_chatgpt_search, use_bing, use_duckduckgo, use_google
+            )
+            print("✅ YouTube情報収集完了")
+            # 即座にログを保存
+            if self.logger:
+                self.logger._save_log()
         else:
-            print("📚 情報収集中... (並列実行)")
-        
-        # 並列実行でWikipedia、Web検索、YouTube情報収集を同時実行
-        # 全体のタイムアウトを設定（3分）
-        import signal
-        
-        def timeout_handler(signum, frame):
-            raise TimeoutError("情報収集全体がタイムアウトしました（3分）")
-        
-        # タイムアウトハンドラーを設定（macOSでは動作しない可能性があるため、try-exceptで囲む）
-        try:
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(180)  # 3分のタイムアウト
-        except:
-            print("  ⚠️ タイムアウト設定がサポートされていない環境です")
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            # タスクを同時実行
-            if not use_realtime_display:
-                print("  - Wikipedia情報収集を開始...")
-            else:
-                progress_reporter.start_component("wikipedia")
-                
-            wikipedia_future = executor.submit(
-                self._collect_wikipedia_info, name, progress_reporter
-            )
-            
-            if not use_realtime_display:
-                print("  - Web検索情報収集を開始...")
-            else:
-                progress_reporter.start_component("web_search")
-                
-            web_search_future = executor.submit(
-                self._collect_web_search_info,
-                name, use_google, use_duckduckgo, use_bing, use_chatgpt_search,
-                progress_reporter
-            )
-            
-            youtube_future = None
-            if use_youtube:
-                if not use_realtime_display:
-                    print("  - YouTube情報収集を開始...")
-                else:
-                    progress_reporter.start_component("youtube")
-                    
-                youtube_future = executor.submit(
-                    self._collect_youtube_info,
-                    name, use_chatgpt_search, use_bing, use_duckduckgo, use_google,
-                    progress_reporter
-                )
-            
-            # 結果を収集（タイムアウト付き）
-            try:
-                # Wikipedia情報（短時間での完了を期待）
-                character_info["wikipedia_info"] = wikipedia_future.result(timeout=30)
-                if not use_realtime_display:
-                    print("✅ Wikipedia情報収集完了")
-                else:
-                    progress_reporter.complete_component("wikipedia")
-            except concurrent.futures.TimeoutError:
-                if not use_realtime_display:
-                    print("⚠️ Wikipedia情報収集がタイムアウトしました")
-                else:
-                    progress_reporter.error_component("wikipedia", "タイムアウト")
-                character_info["wikipedia_info"] = {
-                    "found": False,
-                    "error": "タイムアウト",
-                    "results": [],
-                    "total_results": 0
-                }
-            except Exception as e:
-                if not use_realtime_display:
-                    print(f"❌ Wikipedia情報収集エラー: {e}")
-                else:
-                    progress_reporter.error_component("wikipedia", str(e))
-                character_info["wikipedia_info"] = {
-                    "found": False,
-                    "error": str(e),
-                    "results": [],
-                    "total_results": 0
-                }
-            
-            try:
-                # Web検索情報（適切な時間で制限）
-                character_info["google_search_results"] = web_search_future.result(timeout=90)
-                if not use_realtime_display:
-                    print("✅ Web検索情報収集完了")
-                else:
-                    progress_reporter.complete_component("web_search")
-            except concurrent.futures.TimeoutError:
-                if not use_realtime_display:
-                    print("⚠️ Web検索情報収集がタイムアウトしました（90秒）")
-                else:
-                    progress_reporter.error_component("web_search", "タイムアウト（90秒）")
-                # タイムアウト時はキャンセルを試行
-                try:
-                    web_search_future.cancel()
-                except:
-                    pass
-                character_info["google_search_results"] = {
-                    "found": False,
-                    "error": "タイムアウト（90秒）",
-                    "results": [],
-                    "total_results": 0
-                }
-            except Exception as e:
-                if not use_realtime_display:
-                    print(f"❌ Web検索情報収集エラー: {e}")
-                else:
-                    progress_reporter.error_component("web_search", str(e))
-                character_info["google_search_results"] = {
-                    "found": False,
-                    "error": str(e),
-                    "results": [],
-                    "total_results": 0
-                }
-            
-            if youtube_future:
-                try:
-                    # YouTube情報（長時間の処理を想定）
-                    character_info["youtube_transcripts"] = youtube_future.result(timeout=120)
-                    if not use_realtime_display:
-                        print("✅ YouTube情報収集完了")
-                    else:
-                        progress_reporter.complete_component("youtube")
-                except concurrent.futures.TimeoutError:
-                    if not use_realtime_display:
-                        print("⚠️ YouTube情報収集がタイムアウトしました")
-                    else:
-                        progress_reporter.error_component("youtube", "タイムアウト")
-                    character_info["youtube_transcripts"] = {
-                        "found": False,
-                        "error": "タイムアウト",
-                        "transcripts": [],
-                        "total_videos": 0,
-                        "sample_phrases": []
-                    }
-                except Exception as e:
-                    if not use_realtime_display:
-                        print(f"❌ YouTube情報収集エラー: {e}")
-                    else:
-                        progress_reporter.error_component("youtube", str(e))
-                    character_info["youtube_transcripts"] = {
-                        "found": False,
-                        "error": str(e),
-                        "transcripts": [],
-                        "total_videos": 0,
-                        "sample_phrases": []
-                    }
-            else:
-                character_info["youtube_transcripts"] = {
-                    "found": False,
-                    "error": "YouTube情報収集が無効化されています",
-                    "transcripts": [],
-                    "total_videos": 0,
-                    "sample_phrases": [],
-                    "skipped": True
-                }
-        
-        # タイムアウトをキャンセル
-        try:
-            signal.alarm(0)
-        except:
-            pass
-        
-        # リアルタイム表示を停止
-        if console_display:
-            console_display.stop()
+            character_info["youtube_transcripts"] = {
+                "found": False,
+                "error": "YouTube情報収集が無効化されています",
+                "transcripts": [],
+                "total_videos": 0,
+                "sample_phrases": [],
+                "skipped": True
+            }
         
         return character_info
     
-    def _collect_wikipedia_info(self, name: str, progress_reporter=None) -> Dict[str, Any]:
+    def _collect_wikipedia_info(self, name: str) -> Dict[str, Any]:
         """Wikipedia情報を収集"""
         try:
-            # print("📖 Wikipedia情報を収集中...")  # 並列実行のため出力を制御
+            print("📖 Wikipedia情報を収集中...")
             if self.logger:
                 self.logger.log_step("wikipedia_collection", "start", {"character_name": name})
+                self.logger._save_log()  # 開始時にログを即座に保存
             
             start_time = time.time()
+            print(f"    キャラクター名「{name}」でWikipediaを検索中...")
             collector = CollectorFactory.create_wikipedia_collector()
             result = collector.collect_info(name, logger=self.logger)
             duration = time.time() - start_time
+            
+            if result and hasattr(result, 'found') and result.found:
+                print(f"    ✅ Wikipedia記事を発見")
+            else:
+                print(f"    ⚠️ Wikipedia記事が見つかりませんでした")
             
             if self.logger:
                 self.logger.log_step("wikipedia_collection", "success", result.to_dict(), duration)
@@ -281,8 +155,7 @@ class CharacterInfoService:
         use_google: bool, 
         use_duckduckgo: bool, 
         use_bing: bool, 
-        use_chatgpt_search: bool,
-        progress_reporter=None
+        use_chatgpt_search: bool
     ) -> Dict[str, Any]:
         """Web検索情報を収集"""
         try:
@@ -302,7 +175,8 @@ class CharacterInfoService:
                 SearchEngineType.GOOGLE: "🔍 Google検索情報を収集中..."
             }
             
-            # print(engine_messages.get(engine_type, "🔍 Web検索情報を収集中..."))  # 並列実行のため出力を制御
+            print(engine_messages.get(engine_type, "🔍 Web検索情報を収集中..."))
+            print(f"    キャラクター名「{name}」で検索開始...")
             
             if self.logger:
                 step_name = f"{engine_type.value}_collection"
@@ -314,6 +188,12 @@ class CharacterInfoService:
             )
             result = collector.collect_info(name, logger=self.logger, api_key=self.api_key)
             duration = time.time() - start_time
+            
+            if result and hasattr(result, 'found') and result.found:
+                result_count = getattr(result, 'total_results', 0)
+                print(f"    ✅ {result_count}件の検索結果を取得")
+            else:
+                print(f"    ⚠️ 検索結果が見つかりませんでした")
             
             if self.logger:
                 step_name = f"{engine_type.value}_collection"
@@ -352,31 +232,44 @@ class CharacterInfoService:
         use_chatgpt_search: bool, 
         use_bing: bool, 
         use_duckduckgo: bool, 
-        use_google: bool,
-        progress_reporter=None
+        use_google: bool
     ) -> Dict[str, Any]:
         """YouTube情報を収集"""
         try:
-            # print("🎥 YouTube情報を収集中...")  # 並列実行のため出力を制御
+            print("🎥 YouTube情報を収集中...")
             if self.logger:
                 self.logger.log_step("youtube_collection", "start", {"character_name": name})
             
             start_time = time.time()
             
             # YouTube URL検索用のコレクターを選択
+            print(f"    YouTube動画URL検索中...")
             youtube_urls = self._get_youtube_urls(
                 name, use_chatgpt_search, use_bing, use_duckduckgo, use_google
             )
             
+            if youtube_urls:
+                print(f"    {len(youtube_urls)}個のYouTube動画URLを発見")
+            else:
+                print(f"    ⚠️ YouTube動画URLが見つかりませんでした")
+            
             # YouTube字幕収集
+            if youtube_urls:
+                print(f"    字幕データ収集中（最大{YOUTUBE_MAX_VIDEOS}動画）...")
             youtube_collector = CollectorFactory.create_youtube_collector()
             youtube_info = youtube_collector.collect_info(
                 youtube_urls,
-                max_videos=config.search.youtube_max_videos,
+                max_videos=YOUTUBE_MAX_VIDEOS,
                 logger=self.logger, 
                 character_info={"name": name}, 
                 api_key=self.api_key
             )
+            
+            if youtube_info.get('found', False):
+                transcript_count = len(youtube_info.get('transcripts', []))
+                print(f"    ✅ {transcript_count}個の動画から字幕を取得")
+            else:
+                print(f"    ⚠️ 字幕データの取得に失敗しました")
             
             duration = time.time() - start_time
             
@@ -422,14 +315,14 @@ class CharacterInfoService:
         try:
             if use_chatgpt_search:
                 # ChatGPT検索の場合は代替手段でYouTube URLを取得
-                # print("  YouTube動画URL取得: Web検索を使用（YouTube字幕収集のため）")  # 並列実行のため出力を制御
+                print("  YouTube動画URL取得: Web検索を使用（YouTube字幕収集のため）")
                 
                 # 利用可能な検索エンジンを自動選択
-                if config.api.google_api_key and config.api.google_cx:
-                    # print("    Google Custom Search APIでYouTube動画を検索")  # 並列実行のため出力を制御
+                if GOOGLE_API_KEY and GOOGLE_CX:
+                    print("    Google Custom Search APIでYouTube動画を検索")
                     collector = CollectorFactory.create_search_engine_collector(SearchEngineType.GOOGLE)
                 else:
-                    # print("    Bing検索でYouTube動画を検索（Google API未設定のため）")  # 並列実行のため出力を制御
+                    print("    Bing検索でYouTube動画を検索（Google API未設定のため）")
                     collector = CollectorFactory.create_search_engine_collector(SearchEngineType.BING)
                 
                 return collector.search_youtube_videos(name)
@@ -439,7 +332,7 @@ class CharacterInfoService:
                 return collector.search_youtube_videos(name)
             
             elif use_duckduckgo:
-                # print("  注意: DuckDuckGo使用時はYouTube動画URLの自動検索はスキップされます")  # 並列実行のため出力を制御
+                print("  注意: DuckDuckGo使用時はYouTube動画URLの自動検索はスキップされます")
                 return []
             
             elif use_google:
@@ -447,9 +340,9 @@ class CharacterInfoService:
                 return collector.search_youtube_videos(name)
             
             else:
-                # print("  注意: Web検索が無効のためYouTube動画URLの自動検索はスキップされます")  # 並列実行のため出力を制御
+                print("  注意: Web検索が無効のためYouTube動画URLの自動検索はスキップされます")
                 return []
                 
         except Exception as e:
-            # print(f"YouTube URL取得エラー: {e}")  # 並列実行のため出力を制御（エラーはloggerに記録）
+            print(f"YouTube URL取得エラー: {e}")
             return []

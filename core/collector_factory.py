@@ -7,7 +7,7 @@ from enum import Enum
 
 from core.interfaces import BaseCollector
 from core.exceptions import ConfigurationError
-from config import config
+from config import GOOGLE_DELAY, GOOGLE_API_KEY, GOOGLE_CX, DEFAULT_DELAY
 
 
 class SearchEngineType(Enum):
@@ -41,23 +41,23 @@ class CollectorFactory:
         if engine_type == SearchEngineType.GOOGLE:
             from collectors.google_collector import GoogleCollector
             return GoogleCollector(
-                delay=config.search.google_delay,
-                google_api_key=config.api.google_api_key,
-                google_cx=config.api.google_cx,
+                delay=GOOGLE_DELAY,
+                google_api_key=GOOGLE_API_KEY,
+                google_cx=GOOGLE_CX,
                 **kwargs
             )
         
         elif engine_type == SearchEngineType.BING:
             from collectors.bing_collector import BingCollector
             return BingCollector(
-                delay=config.collector.default_delay,
+                delay=DEFAULT_DELAY,
                 **kwargs
             )
         
         elif engine_type == SearchEngineType.DUCKDUCKGO:
             from collectors.duckduckgo_collector import DuckDuckGoCollector
             return DuckDuckGoCollector(
-                delay=config.collector.default_delay,
+                delay=DEFAULT_DELAY,
                 **kwargs
             )
         
@@ -66,7 +66,7 @@ class CollectorFactory:
             if not api_key:
                 raise ConfigurationError("ChatGPT検索にはAPI Keyが必要です")
             return ChatGPTCollector(
-                delay=config.collector.default_delay,
+                delay=DEFAULT_DELAY,
                 **kwargs
             )
         

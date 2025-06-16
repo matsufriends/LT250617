@@ -8,7 +8,12 @@ from typing import Optional, Dict, Any, List
 
 from core.interfaces import BaseCollector, CollectionResult, SearchResult
 from core.exceptions import WikipediaError
-from config import config
+from config import (
+    WIKIPEDIA_SUMMARY_LIMIT,
+    SAMPLE_QUALITY_MIN_LENGTH,
+    SAMPLE_PHRASES_MAX,
+    MULTIPLIER_DOUBLE
+)
 from utils.text_processor import TextProcessor
 from utils.execution_logger import ExecutionLogger
 
@@ -42,7 +47,9 @@ class WikipediaCollector(BaseCollector):
         
         try:
             # まず検索してページを特定
-            search_results = wikipedia.search(name, results=5)
+            print(f"      Wikipedia検索開始: '{name}'")
+            search_results = wikipedia.search(name, results=SAMPLE_QUALITY_MIN_LENGTH)
+            print(f"      {len(search_results)}件の検索結果")
             
             if not search_results:
                 return self._create_error_result(
@@ -52,15 +59,18 @@ class WikipediaCollector(BaseCollector):
             
             # 最適なページを選択
             page_title = self._select_best_character_option(name, search_results)
+            print(f"      選択されたページ: '{page_title}'")
+            print(f"      ページ情報を取得中...")
             page = wikipedia.page(page_title)
             
             result_data = {
                 "title": page.title,
-                "summary": page.summary[:500],  # 最初の500文字
-                "content": page.content[:2000],  # 最初の2000文字
+                "summary": page.summary[:WIKIPEDIA_SUMMARY_LIMIT],  # 最初の文字数
+                "content": page.content[:int(WIKIPEDIA_SUMMARY_LIMIT * MULTIPLIER_DOUBLE)],  # 要約の2倍の文字数
                 "url": page.url,
-                "categories": page.categories[:10] if hasattr(page, 'categories') else []
+                "categories": page.categories[:SAMPLE_PHRASES_MAX] if hasattr(page, 'categories') else []
             }
+            print(f"      ✅ Wikipedia情報取得完了: '{page.title}'")
             
             return CollectionResult(
                 found=True,
@@ -73,16 +83,18 @@ class WikipediaCollector(BaseCollector):
             # 曖昧さ回避ページの場合
             try:
                 # キャラクター名らしい候補を選択
+                print(f"      曖昧さ回避ページを検出: {len(e.options)}件の候補")
                 best_option = self._select_best_character_option(name, e.options)
+                print(f"      選択されたページ: '{best_option}'")
                 page = wikipedia.page(best_option)
                 
                 result_data = {
                     "title": page.title,
-                    "summary": page.summary[:500],
-                    "content": page.content[:2000],
+                    "summary": page.summary[:WIKIPEDIA_SUMMARY_LIMIT],
+                    "content": page.content[:int(WIKIPEDIA_SUMMARY_LIMIT * MULTIPLIER_DOUBLE)],
                     "url": page.url,
-                    "categories": page.categories[:10] if hasattr(page, 'categories') else [],
-                    "other_options": e.options[:5]  # 候補も記録
+                    "categories": page.categories[:SAMPLE_PHRASES_MAX] if hasattr(page, 'categories') else [],
+                    "other_options": e.options[:SAMPLE_QUALITY_MIN_LENGTH]  # 候補も記録
                 }
                 
                 return CollectionResult(
@@ -95,7 +107,7 @@ class WikipediaCollector(BaseCollector):
                 return self._create_error_result(
                     f"曖昧さ回避エラー: {str(inner_e)}",
                     query=name,
-                    details={"disambiguation_options": e.options[:5]}
+                    details={"disambiguation_options": e.options[:SAMPLE_QUALITY_MIN_LENGTH]}
                 )
                 
         except wikipedia.exceptions.PageError:
@@ -110,7 +122,7 @@ class WikipediaCollector(BaseCollector):
                 query=name
             )
     
-    def search_suggestions(self, name: str, limit: int = 10) -> List[str]:
+    def search_suggestions(self, name: str, limit: int = SAMPLE_PHRASES_MAX) -> List[str]:
         """
         検索候補を取得
         
@@ -157,7 +169,7 @@ class WikipediaCollector(BaseCollector):
         best_score = -1
         best_option = options[0]  # デフォルトは最初の候補
         
-        for option in options[:10]:  # 上位10件のみチェック
+        for option in options[:SAMPLE_PHRASES_MAX]:  # 上位件数のみチェック
             score = 0
             option_lower = option.lower()
             

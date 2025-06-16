@@ -16,7 +16,19 @@ from core.interfaces import SearchEngineCollector, CollectionResult, SearchResul
 from core.exceptions import SearchEngineError
 from utils.api_client import OpenAIClient
 from utils.execution_logger import ExecutionLogger
-from config import config
+from config import (
+    GOOGLE_DELAY, GOOGLE_RESULTS, GOOGLE_API_RESULTS, GOOGLE_PAGE_LIMIT,
+    YOUTUBE_MAX_URLS, YOUTUBE_SEARCH_DELAY, GOOGLE_FALLBACK_DELAY_MULTIPLIER,
+    GOOGLE_MIN_DELAY, GOOGLE_URL_FETCH_DELAY, GOOGLE_PAGE_DELAY_MULTIPLIER,
+    GOOGLE_YOUTUBE_DELAY_MULTIPLIER, GOOGLE_CX_DISPLAY_LENGTH,
+    GOOGLE_API_MAX_RESULTS_PER_REQUEST, GOOGLE_FALLBACK_MAX_RETRIES,
+    GOOGLE_FALLBACK_RETRY_DELAY, GOOGLE_PATTERN_TIMEOUT, GOOGLE_SEARCH_TIMEOUT,
+    GOOGLE_MIN_TEXT_LENGTH_FOR_API, GOOGLE_YOUTUBE_API_RESULTS, REQUEST_TIMEOUT,
+    HTTP_STATUS_OK, HTTP_STATUS_FORBIDDEN, HTTP_STATUS_TOO_MANY_REQUESTS,
+    SAMPLE_QUALITY_MIN_LENGTH, BING_NAME_LENGTH_CHECK, MAX_RETRIES,
+    DEFAULT_USER_AGENT, PREVIEW_LENGTH_LONG, THREAD_POOL_MAX_WORKERS_SINGLE,
+    GOOGLE_429_EXTRA_DELAY, GOOGLE_FETCH_PAGE_CONTENT, HTTP_STATUS_NOT_FOUND
+)
 
 
 class GoogleCollector(SearchEngineCollector):
@@ -31,7 +43,7 @@ class GoogleCollector(SearchEngineCollector):
             google_api_key: Google Custom Search API Key
             google_cx: Google Custom Search Engine ID
         """
-        super().__init__(delay or config.search.google_delay, **kwargs)
+        super().__init__(delay or GOOGLE_DELAY, **kwargs)
         self.session = requests.Session()
         
         # Google Custom Search API設定
@@ -43,24 +55,17 @@ class GoogleCollector(SearchEngineCollector):
         
         # 標準的なHTTPヘッダー
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': DEFAULT_USER_AGENT,
             'Accept': 'application/json',
             'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8'
         })
         
         if self.google_api_key and self.google_cx:
-            self._safe_print(f"  Google Custom Search API: 有効 (CX: {self.google_cx[:10]}...)")
+            print(f"  Google Custom Search API: 有効 (CX: {self.google_cx[:GOOGLE_CX_DISPLAY_LENGTH]}...)")
         else:
-            self._safe_print(f"  Google Custom Search API: 無効 (フォールバック検索を使用)")
-            self._safe_print(f"    💡 設定方法: GOOGLE_API_KEY と GOOGLE_CX 環境変数を設定")
+            print(f"  Google Custom Search API: 無効 (フォールバック検索を使用)")
+            print(f"    💡 設定方法: GOOGLE_API_KEY と GOOGLE_CX 環境変数を設定")
     
-    def _safe_print(self, *args, **kwargs):
-        """リアルタイム表示を考慮した安全な出力"""
-        try:
-            from utils.output_suppressor import safe_print
-            safe_print(*args, **kwargs)
-        except ImportError:
-            print(*args, **kwargs)
     
     def collect_info(self, name: str, logger: Optional[ExecutionLogger] = None, api_key: Optional[str] = None, num_results: int = None, **kwargs) -> CollectionResult:
         """
@@ -76,39 +81,42 @@ class GoogleCollector(SearchEngineCollector):
             収集した情報
         """
         start_time = time.time()
-        num_results = num_results or config.search.google_results
+        num_results = num_results or GOOGLE_RESULTS
         
         try:
             all_search_results = []
             
             # Custom Search APIが利用可能かチェック
             if self.google_api_key and self.google_cx:
+                print(f"    Google Custom Search APIを使用")
                 # Custom Search APIを使用
                 search_patterns = self._get_search_patterns(name)
-                results_per_pattern = max(1, min(config.search.google_api_results, num_results // len(search_patterns)))  # API制限考慮
+                print(f"    {len(search_patterns)}個の検索パターンを使用")
+                results_per_pattern = max(1, min(GOOGLE_API_RESULTS, num_results // len(search_patterns)))  # API制限考慮
                 
                 for i, pattern in enumerate(search_patterns):
-                    self._safe_print(f"Google Custom Search API検索中 ({i+1}/{len(search_patterns)}): {pattern}")
+                    print(f"\n    パターン{i+1}/{len(search_patterns)}: '{pattern}'")
                     pattern_results = self._search_with_api(pattern, results_per_pattern, name, api_key, logger)
                     all_search_results.extend(pattern_results)
-                    self._safe_print(f"    パターン{i+1}完了: {len(pattern_results)}件取得")
+                    print(f"      ✅ {len(pattern_results)}件の結果を取得")
                     
                     # API制限対策で適度な待機
                     time.sleep(self.delay)
             else:
                 # フォールバック: 従来の検索方法
-                self._safe_print("⚠️  Google Custom Search APIが設定されていません。フォールバック検索を使用します。")
+                print("⚠️  Google Custom Search APIが設定されていません。フォールバック検索を使用します。")
                 search_patterns = self._get_search_patterns(name)
+                print(f"    {len(search_patterns)}個の検索パターンを使用")
                 results_per_pattern = max(1, num_results // len(search_patterns))
                 
                 for i, pattern in enumerate(search_patterns):
-                    self._safe_print(f"Google フォールバック検索中 ({i+1}/{len(search_patterns)}): {pattern}")
+                    print(f"\n    パターン{i+1}/{len(search_patterns)}: '{pattern}'")
                     pattern_results = self._search_single_pattern_fallback(pattern, results_per_pattern, name, api_key, logger)
                     all_search_results.extend(pattern_results)
-                    self._safe_print(f"    パターン{i+1}完了: {len(pattern_results)}件取得")
+                    print(f"      ✅ {len(pattern_results)}件の結果を取得")
                     
                     # レート制限対策で大幅待機
-                    time.sleep(self.delay * 3)
+                    time.sleep(self.delay * GOOGLE_FALLBACK_DELAY_MULTIPLIER)
             
             duration = time.time() - start_time
             query_description = "複数パターン検索（Custom Search API）" if self.google_api_key else "複数パターン検索（フォールバック）"
@@ -172,24 +180,23 @@ class GoogleCollector(SearchEngineCollector):
                 'key': self.google_api_key,
                 'cx': self.google_cx,
                 'q': search_query,
-                'num': min(max_results, 10),  # APIは最大10件まで（Google制限）
+                'num': min(max_results, GOOGLE_API_MAX_RESULTS_PER_REQUEST),  # APIは最大件数まで（Google制限）
                 'lr': 'lang_ja',  # 日本語結果を優先
                 'gl': 'jp',  # 日本からの検索として実行
                 'safe': 'off'  # セーフサーチオフ
             }
             
-            self._safe_print(f"    API検索実行: {search_query}")
-            self._safe_print(f"    API URL: {self.api_base_url}")
-            self._safe_print(f"    API Key: {'設定済み' if self.google_api_key else '未設定'}")
-            self._safe_print(f"    CX: {'設定済み' if self.google_cx else '未設定'}")
+            print(f"      Google Custom Search APIリクエスト送信中...")
+            print(f"      API Key: {self.google_api_key[:10]}... (length: {len(self.google_api_key)})")
+            print(f"      CX: {self.google_cx[:GOOGLE_CX_DISPLAY_LENGTH] if self.google_cx else 'None'}... (length: {len(self.google_cx) if self.google_cx else 0})")
             
-            response = self.session.get(self.api_base_url, params=params, timeout=15)
+            response = self.session.get(self.api_base_url, params=params, timeout=REQUEST_TIMEOUT)
             
-            if response.status_code == 200:
+            if response.status_code == HTTP_STATUS_OK:
                 data = response.json()
                 
                 if 'items' in data:
-                    self._safe_print(f"    API結果: {len(data['items'])}件取得")
+                    print(f"      APIから{len(data['items'])}件の結果を取得")
                     
                     for item in data['items']:
                         try:
@@ -198,15 +205,29 @@ class GoogleCollector(SearchEngineCollector):
                             snippet = item.get('snippet', '')
                             
                             if url and title:
-                                # ページ内容を詳細取得
-                                content_info = self._extract_page_content(url, character_name, api_key, logger)
-                                if content_info:
-                                    # API結果の情報もマージ
-                                    content_info['api_title'] = title
-                                    content_info['api_snippet'] = snippet
-                                    search_results.append(content_info)
+                                if GOOGLE_FETCH_PAGE_CONTENT:
+                                    # ページ内容を詳細取得
+                                    print(f"        ページ取得中: {url[:50]}...")
+                                    content_info = self._extract_page_content(url, character_name, api_key, logger)
+                                    if content_info:
+                                        # API結果の情報もマージ
+                                        content_info['api_title'] = title
+                                        content_info['api_snippet'] = snippet
+                                        search_results.append(content_info)
+                                    else:
+                                        # ページ取得に失敗した場合はAPI結果のみ使用
+                                        content_info = {
+                                            "url": url,
+                                            "domain": self._extract_domain(url),
+                                            "title": title,
+                                            "description": snippet,
+                                            "content": snippet,
+                                            "content_length": len(snippet),
+                                            "speech_patterns": self._extract_basic_patterns(snippet + " " + title, character_name)
+                                        }
+                                        search_results.append(content_info)
                                 else:
-                                    # ページ取得に失敗した場合はAPI結果のみ使用
+                                    # ページ取得をスキップしてAPI結果のみ使用（高速化）
                                     content_info = {
                                         "url": url,
                                         "domain": self._extract_domain(url),
@@ -214,7 +235,7 @@ class GoogleCollector(SearchEngineCollector):
                                         "description": snippet,
                                         "content": snippet,
                                         "content_length": len(snippet),
-                                        "speech_patterns": self._extract_basic_patterns(snippet + " " + title, character_name)
+                                        "speech_patterns": []
                                     }
                                     search_results.append(content_info)
                                 
@@ -222,30 +243,51 @@ class GoogleCollector(SearchEngineCollector):
                                 time.sleep(self.delay)
                                 
                         except Exception as e:
-                            self._safe_print(f"    API結果処理エラー: {e}")
+                            print(f"    API結果処理エラー: {e}")
                             continue
                 else:
-                    self._safe_print(f"    API結果: 検索結果なし")
+                    print(f"      ⚠️ 検索結果がありません")
                     
-            elif response.status_code == 403:
-                self._safe_print(f"    API制限エラー: 日次クォータ超過またはAPI Key無効")
+            elif response.status_code == HTTP_STATUS_TOO_MANY_REQUESTS:
+                print(f"      ❌ Google Custom Search APIの日次クォータを超過しました（429エラー）")
+                print(f"      💡 対処法:")
+                print(f"         1. --use-bing フラグでBing検索を使用")
+                print(f"         2. --use-chatgpt-search フラグでChatGPT知識ベースを使用")
+                print(f"         3. --no-google フラグでGoogle検索を無効化")
+                print(f"         4. 翌日まで待つ（クォータは日本時間午前0時にリセット）")
+            elif response.status_code == HTTP_STATUS_FORBIDDEN:
+                print(f"      ❌ API認証エラー: API Keyが無効または設定ミス")
                 if logger:
                     logger.log_error("google_api_quota_error", "Google Custom Search API quota exceeded", {
                         "search_query": search_query,
                         "status_code": response.status_code,
-                        "response": response.text[:200]
+                        "response": response.text[:PREVIEW_LENGTH_LONG]
                     })
             else:
-                self._safe_print(f"    API検索失敗: HTTP {response.status_code}")
+                print(f"      ❌ API検索失敗: HTTP {response.status_code}")
+                if response.status_code == HTTP_STATUS_TOO_MANY_REQUESTS:
+                    print(f"      ❌ Google Custom Search APIの日次クォータを超過しました")
+                    print(f"      💡 対処法:")
+                    print(f"         1. --use-bing フラグでBing検索を使用")
+                    print(f"         2. --use-chatgpt-search フラグでChatGPT知識ベースを使用")
+                    print(f"         3. --no-google フラグでGoogle検索を無効化")
+                    print(f"         4. 翌日まで待つ（クォータは日本時間午前0時にリセット）")
+                elif response.status_code == HTTP_STATUS_NOT_FOUND:
+                    print(f"      ❌ Google Custom Search Engine ID (CX) が無効です")
+                    print(f"      💡 対処法:")
+                    print(f"         1. Google Custom Search Engineを作成: https://programmablesearchengine.google.com/")
+                    print(f"         2. 環境変数 GOOGLE_CX に検索エンジンIDを設定")
+                    print(f"         3. または --use-bing / --use-chatgpt-search を使用")
+                    print(f"      現在のCX: {self.google_cx if self.google_cx else '未設定'}")
                 if logger:
                     logger.log_error("google_api_error", f"Google Custom Search API error: {response.status_code}", {
                         "search_query": search_query,
                         "status_code": response.status_code,
-                        "response": response.text[:200]
+                        "response": response.text[:PREVIEW_LENGTH_LONG]
                     })
                         
         except Exception as e:
-            self._safe_print(f"    API検索エラー ({search_query}): {e}")
+            print(f"      ❌ API検索エラー: {e}")
             if logger:
                 logger.log_error("google_api_exception", str(e), {
                     "search_query": search_query,
@@ -268,17 +310,17 @@ class GoogleCollector(SearchEngineCollector):
         """
         search_results = []
         
-        max_retries = 2  # リトライ回数を減らして全体の処理時間を短縮
-        retry_delay = 20  # 20秒待機に短縮
+        max_retries = GOOGLE_FALLBACK_MAX_RETRIES  # リトライ回数を減らして全体の処理時間を短縮
+        retry_delay = GOOGLE_FALLBACK_RETRY_DELAY  # 待機時間
         
-        # パターン全体のタイムアウト（最大90秒）
+        # パターン全体のタイムアウト
         pattern_start_time = time.time()
-        pattern_timeout = 90
+        pattern_timeout = GOOGLE_PATTERN_TIMEOUT
         
         for retry in range(max_retries):
             # パターン全体のタイムアウトチェック
             if time.time() - pattern_start_time > pattern_timeout:
-                self._safe_print(f"    ⚠️ パターン全体がタイムアウト（{pattern_timeout}秒）のため処理を中断します")
+                print(f"    ⚠️ パターン全体がタイムアウト（{pattern_timeout}秒）のため処理を中断します")
                 break
             try:
                 # Google検索を実行（User-Agent設定付き）
@@ -287,9 +329,9 @@ class GoogleCollector(SearchEngineCollector):
                 # googlesearch-pythonライブラリに追加の設定を試行
                 try:
                     # ランダムな待機時間でより人間らしい動作を模倣
-                    base_delay = max(self.delay * 3, 10.0)  # 最低10秒待機
+                    base_delay = max(self.delay * GOOGLE_FALLBACK_DELAY_MULTIPLIER, GOOGLE_MIN_DELAY)  # 最低待機時間
                     
-                    self._safe_print(f"    Google検索実行中（{base_delay}秒間隔で慎重に取得）...")
+                    print(f"      フォールバック検索実行中（{base_delay}秒間隔で慎重に取得）...")
                     
                     # googlesearch-pythonのUser-Agent設定を試行
                     import googlesearch
@@ -317,45 +359,45 @@ class GoogleCollector(SearchEngineCollector):
                                     country='jp'  # 日本からの検索を明示
                                 ))
                             except Exception as e:
-                                self._safe_print(f"    検索関数内エラー: {e}")
+                                print(f"    検索関数内エラー: {e}")
                                 return []
                         
                         # 60秒のタイムアウトで検索実行
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=THREAD_POOL_MAX_WORKERS_SINGLE) as executor:
                             future = executor.submit(search_with_timeout)
                             try:
-                                search_results = future.result(timeout=60)
-                                self._safe_print(f"    検索完了: {len(search_results)}件のURL取得")
+                                search_results = future.result(timeout=GOOGLE_SEARCH_TIMEOUT)
+                                print(f"      {len(search_results)}件のURLを取得")
                                 
                                 for url in search_results:
                                     search_urls.append(url)
-                                    self._safe_print(f"    URL取得: {url}")
+                                    print(f"    URL取得: {url}")
                                     
                                     if len(search_urls) >= max_results:
                                         break
                                     
                                     # 適度な待機
-                                    time.sleep(1.0)
+                                    time.sleep(GOOGLE_URL_FETCH_DELAY)
                                     
                             except concurrent.futures.TimeoutError:
-                                self._safe_print(f"    ⚠️ 検索処理がタイムアウト（60秒）のため中断します")
+                                print(f"    ⚠️ 検索処理がタイムアウト（{GOOGLE_SEARCH_TIMEOUT}秒）のため中断します")
                                 search_timeout = True
                                 future.cancel()
                                 
                     except Exception as search_setup_error:
-                        self._safe_print(f"    検索セットアップエラー: {search_setup_error}")
+                        print(f"    検索セットアップエラー: {search_setup_error}")
                         search_timeout = True
                     
                     if search_timeout:
-                        self._safe_print(f"    ⚠️ 検索がタイムアウトしました。取得済みURL: {len(search_urls)}件")
+                        print(f"    ⚠️ 検索がタイムアウトしました。取得済みURL: {len(search_urls)}件")
                         if logger:
-                            logger.log_error("google_search_timeout", "検索処理が60秒でタイムアウト", {
+                            logger.log_error("google_search_timeout", f"検索処理が{GOOGLE_SEARCH_TIMEOUT}秒でタイムアウト", {
                                 "search_query": search_query,
                                 "urls_collected": len(search_urls)
                             })
                         
                 except Exception as search_lib_error:
-                    self._safe_print(f"    googlesearch-pythonライブラリエラー: {search_lib_error}")
+                    print(f"    googlesearch-pythonライブラリエラー: {search_lib_error}")
                     # フォールバック：直接Google検索を試行
                     search_urls = self._fallback_google_search(search_query, max_results)
                 
@@ -368,10 +410,10 @@ class GoogleCollector(SearchEngineCollector):
                             search_results.append(content_info)
                         
                         # レート制限対策で大幅待機
-                        time.sleep(self.delay * 2)
+                        time.sleep(self.delay * GOOGLE_PAGE_DELAY_MULTIPLIER)
                         
                     except Exception as e:
-                        self._safe_print(f"URL取得エラー ({url}): {e}")
+                        print(f"        ⚠️ URL取得エラー: {url[:50]}... - {e}")
                         if logger:
                             logger.log_error("url_extraction_error", str(e), {"url": url, "search_query": search_query})
                         continue
@@ -384,7 +426,7 @@ class GoogleCollector(SearchEngineCollector):
                 print(f"検索パターン実行エラー ({search_query}): {search_error}")
                 
                 # レート制限エラーの場合
-                if "429" in error_str or "Too Many Requests" in error_str:
+                if str(HTTP_STATUS_TOO_MANY_REQUESTS) in error_str or "Too Many Requests" in error_str or "429" in error_str:
                     if logger:
                         logger.log_error("google_rate_limit", f"Google検索レート制限 (試行{retry+1}/{max_retries})", {
                             "search_query": search_query,
@@ -393,17 +435,18 @@ class GoogleCollector(SearchEngineCollector):
                             "error_details": error_str
                         })
                         
-                    print(f"⚠️  Google検索でレート制限エラーが発生しました")
+                    print(f"⚠️  Google検索で429エラー（レート制限）が発生しました")
                     print(f"    検索クエリ: {search_query}")
                     print(f"    試行回数: {retry + 1}/{max_retries}")
                     
                     if retry < max_retries - 1:
-                        wait_time = retry_delay * (retry + 1)  # 段階的に待機時間を増加
-                        print(f"    {wait_time}秒待機してからリトライします...")
+                        # 429エラー時は特別に長い待機時間を設定
+                        wait_time = GOOGLE_429_EXTRA_DELAY + (retry_delay * (retry + 1))
+                        print(f"    429エラーのため{wait_time}秒待機してからリトライします...")
                         print(f"    💡 頻繁にエラーが出る場合は以下をお試しください:")
                         print(f"       - --use-bing フラグでBing検索を使用")
-                        print(f"       - --no-google フラグでWeb検索を無効化")
-                        print(f"       - しばらく時間を置いてから再実行")
+                        print(f"       - --use-chatgpt-search フラグでChatGPT知識ベースを使用")
+                        print(f"       - Google Custom Search APIの設定（推奨）")
                         time.sleep(wait_time)
                         continue
                     else:
@@ -448,9 +491,9 @@ class GoogleCollector(SearchEngineCollector):
             
             print(f"    直接Google検索URL: {google_url}")
             
-            response = self.session.get(google_url, timeout=15)
+            response = self.session.get(google_url, timeout=REQUEST_TIMEOUT)
             
-            if response.status_code == 200:
+            if response.status_code == HTTP_STATUS_OK:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
                 # Google検索結果のリンクを抽出
@@ -498,7 +541,7 @@ class GoogleCollector(SearchEngineCollector):
             
             # 共通HTTPクライアントを使用してリクエストを実行
             from utils.http_client import safe_http_get
-            response = safe_http_get(url, max_retries=2, timeout=15, logger=None, quiet=True)  # 一般的なHTTPエラーはログに記録せず、出力も抑制
+            response = safe_http_get(url, max_retries=MAX_RETRIES, timeout=REQUEST_TIMEOUT, logger=None, quiet=True)  # 一般的なHTTPエラーはログに記録せず、出力も抑制
             
             if not response:
                 return None
@@ -527,11 +570,11 @@ class GoogleCollector(SearchEngineCollector):
             body_text = ' '.join(chunk for chunk in chunks if chunk)
             
             # テキストを制限
-            body_text = body_text[:config.search.google_page_limit] if body_text else ""
+            body_text = body_text[:GOOGLE_PAGE_LIMIT] if body_text else ""
             
             # 口調・セリフ関連の文をChatGPT APIで抽出（API keyがある場合のみ）
             speech_patterns = []
-            if api_key and len(body_text.strip()) > 50:  # 十分なテキストがある場合のみ
+            if api_key and len(body_text.strip()) > GOOGLE_MIN_TEXT_LENGTH_FOR_API:  # 十分なテキストがある場合のみ
                 try:
                     openai_client = OpenAIClient(api_key)
                     speech_patterns = openai_client.extract_speech_patterns(body_text, character_name, logger)
@@ -582,7 +625,7 @@ class GoogleCollector(SearchEngineCollector):
             search_queries = []
             
             # キャラクター名のみの単純な検索
-            if len(name) > 2:  # 名前が短すぎる場合の誤ヒット防止
+            if len(name) > BING_NAME_LENGTH_CHECK:  # 名前が短すぎる場合の誤ヒット防止
                 search_queries.extend([
                     f'"{name}" site:youtube.com'
                 ])
@@ -594,7 +637,7 @@ class GoogleCollector(SearchEngineCollector):
             youtube_urls = []
             
             for search_query in search_queries:
-                if len(youtube_urls) >= config.search.youtube_max_urls:
+                if len(youtube_urls) >= YOUTUBE_MAX_URLS:
                     break
                     
                 print(f"YouTube検索中: {search_query}")
@@ -607,7 +650,7 @@ class GoogleCollector(SearchEngineCollector):
                             if url not in youtube_urls:
                                 youtube_urls.append(url)
                                 print(f"  - 動画URL発見（API）: {url}")
-                            if len(youtube_urls) >= config.search.youtube_max_urls:
+                            if len(youtube_urls) >= YOUTUBE_MAX_URLS:
                                 break
                     else:
                         # フォールバック: 従来の検索方法
@@ -617,9 +660,9 @@ class GoogleCollector(SearchEngineCollector):
                                 youtube_urls.append(url)
                                 print(f"  - 動画URL発見: {url}")
                             
-                            if len(youtube_urls) >= config.search.youtube_max_urls:
+                            if len(youtube_urls) >= YOUTUBE_MAX_URLS:
                                 break
-                            time.sleep(config.search.youtube_search_delay)
+                            time.sleep(YOUTUBE_SEARCH_DELAY)
                         
                 except Exception as search_error:
                     print(f"YouTube検索実行エラー ({search_query}): {search_error}")
@@ -627,7 +670,7 @@ class GoogleCollector(SearchEngineCollector):
                     continue
                 
                 # クエリ間の大幅待機（レート制限対策）
-                time.sleep(self.delay * 4)
+                time.sleep(self.delay * GOOGLE_YOUTUBE_DELAY_MULTIPLIER)
             
             print(f"YouTube動画URL取得完了: {len(youtube_urls)}件")
             return youtube_urls
@@ -655,16 +698,16 @@ class GoogleCollector(SearchEngineCollector):
                 'key': self.google_api_key,
                 'cx': self.google_cx,
                 'q': search_query,
-                'num': 10,  # 最大10件
+                'num': GOOGLE_YOUTUBE_API_RESULTS,  # APIでの取得件数
                 'lr': 'lang_ja',  # 日本語結果を優先
                 'gl': 'jp',  # 日本からの検索として実行
                 'safe': 'off',
                 'siteSearch': 'youtube.com'  # YouTube限定検索
             }
             
-            response = self.session.get(self.api_base_url, params=params, timeout=15)
+            response = self.session.get(self.api_base_url, params=params, timeout=REQUEST_TIMEOUT)
             
-            if response.status_code == 200:
+            if response.status_code == HTTP_STATUS_OK:
                 data = response.json()
                 
                 if 'items' in data:
@@ -673,7 +716,7 @@ class GoogleCollector(SearchEngineCollector):
                         if 'youtube.com/watch?v=' in url:
                             youtube_urls.append(url)
                         
-                        if len(youtube_urls) >= config.search.youtube_max_urls:
+                        if len(youtube_urls) >= YOUTUBE_MAX_URLS:
                             break
                             
         except Exception as e:

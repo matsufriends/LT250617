@@ -6,7 +6,10 @@ import time
 from typing import Dict, Any, Optional, List
 from openai import OpenAI
 
-from config import config
+from config import (OPENAI_MODEL, OPENAI_MAX_TOKENS, OPENAI_TEMPERATURE,
+                    API_PROMPT_SLICE_LENGTH, CHATGPT_FILTER_TEXT_LIMIT,
+                    OPENAI_FILTER_MAX_TOKENS, OPENAI_FILTER_TEMPERATURE,
+                    OPENAI_SEARCH_MAX_TOKENS, OPENAI_SEARCH_TEMPERATURE)
 from core.exceptions import OpenAIError
 from utils.execution_logger import ExecutionLogger
 
@@ -45,20 +48,20 @@ class OpenAIClient:
         
         try:
             response = self.client.chat.completions.create(
-                model=model or config.api.openai_model,
+                model=model or OPENAI_MODEL,
                 messages=messages,
-                max_tokens=max_tokens or config.api.openai_max_tokens,
-                temperature=temperature or config.api.openai_temperature
+                max_tokens=max_tokens or OPENAI_MAX_TOKENS,
+                temperature=temperature or OPENAI_TEMPERATURE
             )
             
             duration = time.time() - start_time
             result_text = response.choices[0].message.content.strip()
             
             api_info = {
-                "model": model or config.api.openai_model,
+                "model": model or OPENAI_MODEL,
                 "messages": messages,
-                "max_tokens": max_tokens or config.api.openai_max_tokens,
-                "temperature": temperature or config.api.openai_temperature,
+                "max_tokens": max_tokens or OPENAI_MAX_TOKENS,
+                "temperature": temperature or OPENAI_TEMPERATURE,
                 "duration": duration
             }
             
@@ -67,8 +70,8 @@ class OpenAIClient:
                 request_data = {
                     "model": api_info["model"],
                     "messages_count": len(messages),
-                    "system_prompt": messages[0]["content"][:200] + "..." if messages and len(messages[0]["content"]) > 200 else messages[0]["content"] if messages else "",
-                    "user_prompt": messages[-1]["content"][:200] + "..." if len(messages) > 1 and len(messages[-1]["content"]) > 200 else messages[-1]["content"] if len(messages) > 1 else ""
+                    "system_prompt": messages[0]["content"][:API_PROMPT_SLICE_LENGTH] + "..." if messages and len(messages[0]["content"]) > API_PROMPT_SLICE_LENGTH else messages[0]["content"] if messages else "",
+                    "user_prompt": messages[-1]["content"][:API_PROMPT_SLICE_LENGTH] + "..." if len(messages) > 1 and len(messages[-1]["content"]) > API_PROMPT_SLICE_LENGTH else messages[-1]["content"] if len(messages) > 1 else ""
                 }
                 
                 response_data = {
@@ -89,7 +92,7 @@ class OpenAIClient:
             
             if logger:
                 logger.log_error(f"{api_type}_error", str(e), {
-                    "model": model or config.api.openai_model,
+                    "model": model or OPENAI_MODEL,
                     "messages_count": len(messages),
                     "duration": duration
                 })
@@ -122,8 +125,8 @@ class OpenAIClient:
                 return []
             
             # テキストが長すぎる場合は切り詰め
-            if len(text) > config.processing.chatgpt_filter_text_limit:
-                text = text[:config.processing.chatgpt_filter_text_limit]
+            if len(text) > CHATGPT_FILTER_TEXT_LIMIT:
+                text = text[:CHATGPT_FILTER_TEXT_LIMIT]
             
             system_prompt = """あなたは日本語テキストから言語的特徴を中立的に抽出する専門家です。
 事前の知識や推測に頼らず、提供されたテキストに実際に含まれている言語的特徴のみを抽出してください。"""
@@ -171,8 +174,8 @@ class OpenAIClient:
             
             response = self.chat_completion(
                 messages=messages,
-                max_tokens=config.api.openai_filter_max_tokens,
-                temperature=config.api.openai_filter_temperature,
+                max_tokens=OPENAI_FILTER_MAX_TOKENS,
+                temperature=OPENAI_FILTER_TEMPERATURE,
                 logger=logger,
                 api_type="openai_speech_pattern_extraction"
             )
@@ -255,8 +258,8 @@ class OpenAIClient:
             
             response = self.chat_completion(
                 messages=messages,
-                max_tokens=config.api.openai_search_max_tokens,
-                temperature=config.api.openai_search_temperature,
+                max_tokens=OPENAI_SEARCH_MAX_TOKENS,
+                temperature=OPENAI_SEARCH_TEMPERATURE,
                 logger=logger,
                 api_type="openai_chatgpt_search"
             )

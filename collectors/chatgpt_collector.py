@@ -3,22 +3,34 @@ ChatGPT知識ベース検索モジュール
 """
 
 import time
-from typing import List, Dict, Any
-from config import config
+from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv
+from core.interfaces import BaseCollector, CollectionResult, SearchResult
+from utils.execution_logger import ExecutionLogger
+from config import (
+    get_search_patterns, CHATGPT_DEFAULT_DELAY, CHATGPT_SEARCH_MAX_TOKENS,
+    CHATGPT_MAX_QUOTES, CHATGPT_MIN_QUOTE_LENGTH, CHATGPT_MAX_PATTERNS,
+    CHATGPT_TOP_KEYWORDS, CHATGPT_KEYWORD_MAX_TOKENS, CHATGPT_MAX_KEYWORDS,
+    SPEECH_PATTERN_EXTRACTION_TEMPERATURE, API_PROMPT_SLICE_LENGTH,
+    OPENAI_MODEL_GPT4O, FRACTION_THREE_HALVES
+)
 
-class ChatGPTCollector:
+# .envファイルから環境変数を読み込み
+load_dotenv()
+
+class ChatGPTCollector(BaseCollector):
     """ChatGPTの知識ベースからキャラクター情報を収集するクラス"""
     
-    def __init__(self, delay: float = 1.0):
+    def __init__(self, delay: float = None, **kwargs):
         """
         初期化
         
         Args:
             delay: API呼び出し間の待機時間（秒）
         """
-        self.delay = delay
+        super().__init__(delay or CHATGPT_DEFAULT_DELAY, **kwargs)
     
-    def collect_info(self, name: str, logger=None, api_key: str = None) -> Dict[str, Any]:
+    def collect_info(self, name: str, logger: Optional[ExecutionLogger] = None, api_key: Optional[str] = None, **kwargs) -> CollectionResult:
         """
         ChatGPTの知識ベースからキャラクター情報を収集
         
@@ -32,17 +44,12 @@ class ChatGPTCollector:
         """
         try:
             if not api_key:
-                return {
-                    "found": False,
-                    "error": "ChatGPT検索にはOpenAI API Keyが必要です",
-                    "results": [],
-                    "total_results": 0
-                }
+                return self._create_error_result("ChatGPT検索にはOpenAI API Keyが必要です")
             
             print(f"  ChatGPT知識ベース検索: {name}")
             
             # 検索パターンを使用してChatGPTに情報を問い合わせ
-            search_patterns = config.search.get_search_patterns(name)
+            search_patterns = get_search_patterns(name)
             all_results = []
             
             for i, pattern in enumerate(search_patterns, 1):
@@ -67,21 +74,32 @@ class ChatGPTCollector:
             
             print(f"  ChatGPT知識ベース検索結果: {len(all_results)}件取得")
             
-            return {
-                "found": len(all_results) > 0,
-                "error": None,
-                "query": "ChatGPT知識ベース検索",
-                "results": all_results,
-                "total_results": len(all_results)
-            }
+            # SearchResultオブジェクトに変換
+            search_result_objects = []
+            for result_dict in all_results:
+                try:
+                    search_result = SearchResult(
+                        url=result_dict.get("url", ""),
+                        title=result_dict.get("title", ""),
+                        description=result_dict.get("description", ""),
+                        content=result_dict.get("content", ""),
+                        domain=result_dict.get("domain", ""),
+                        content_length=result_dict.get("content_length", 0),
+                        speech_patterns=result_dict.get("speech_patterns", []),
+                        source="chatgpt",
+                        search_query=result_dict.get("search_query", "ChatGPT知識ベース検索"),
+                        api_duration=result_dict.get("api_duration")
+                    )
+                    search_result_objects.append(search_result)
+                except Exception as e:
+                    if logger:
+                        logger.log_error("search_result_conversion_error", str(e), result_dict)
+                    continue
+            
+            return self._create_success_result(search_result_objects, "ChatGPT知識ベース検索")
             
         except Exception as e:
-            return {
-                "found": False,
-                "error": f"ChatGPT検索エラー: {str(e)}",
-                "results": [],
-                "total_results": 0
-            }
+            return self._create_error_result(f"ChatGPT検索エラー: {str(e)}", "ChatGPT知識ベース検索")
     
     def _search_with_chatgpt(self, search_query: str, character_name: str, api_key: str, logger=None) -> Dict[str, Any]:
         """
@@ -138,13 +156,13 @@ class ChatGPTCollector:
             start_time = time.time()
             
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=OPENAI_MODEL_GPT4O,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=2000,
-                temperature=0.1  # より正確な情報を得るため低温度設定
+                max_tokens=CHATGPT_SEARCH_MAX_TOKENS,
+                temperature=SPEECH_PATTERN_EXTRACTION_TEMPERATURE  # より正確な情報を得るため低温度設定
             )
             
             api_duration = time.time() - start_time
@@ -155,11 +173,11 @@ class ChatGPTCollector:
                 logger.log_api_call(
                     "openai_chatgpt_search",
                     {
-                        "system_prompt": system_prompt[:200] + "...",
-                        "user_prompt": user_prompt[:300] + "...",
+                        "system_prompt": system_prompt[:API_PROMPT_SLICE_LENGTH] + "...",
+                        "user_prompt": user_prompt[:int(API_PROMPT_SLICE_LENGTH * FRACTION_THREE_HALVES)] + "...",
                         "search_query": search_query,
                         "character_name": character_name,
-                        "model": "gpt-4o"
+                        "model": OPENAI_MODEL_GPT4O
                     },
                     {
                         "search_result": result_text,
@@ -230,8 +248,8 @@ class ChatGPTCollector:
             
             # セリフ例の抽出
             quote_matches = re.findall(r'[「『"]([^」』"]+)[」』"]', text)
-            for i, quote in enumerate(quote_matches[:5]):  # 最大5個まで
-                if len(quote) > 3 and character_name.lower() not in quote.lower():
+            for i, quote in enumerate(quote_matches[:CHATGPT_MAX_QUOTES]):  # 最大5個まで
+                if len(quote) > CHATGPT_MIN_QUOTE_LENGTH and character_name.lower() not in quote.lower():
                     patterns.append(f"セリフ例: {quote}")
             
             # 特徴的表現
@@ -241,7 +259,7 @@ class ChatGPTCollector:
         except Exception as e:
             print(f"パターン抽出エラー: {e}")
         
-        return patterns[:10]  # 最大10個まで
+        return patterns[:CHATGPT_MAX_PATTERNS]  # 最大10個まで
     
     def search_youtube_videos(self, name: str, api_key: str = None) -> List[str]:
         """
@@ -272,7 +290,7 @@ class ChatGPTCollector:
             # 取得したキーワードで実際にYouTube動画を検索
             # 簡単な検索URLパターンを生成（実際のURL取得は困難なため、代表的なものを想定）
             youtube_urls = []
-            for keyword in video_keywords[:3]:  # 上位3つまで
+            for keyword in video_keywords[:CHATGPT_TOP_KEYWORDS]:  # 上位3つまで
                 # 実際の検索は困難なので、想定される一般的なパターンを返す
                 print(f"    YouTube検索キーワード: {keyword}")
                 # ここでは実際のURL検索の代わりに、キーワード情報をYouTubeCollectorに渡す形に変更
@@ -315,12 +333,12 @@ class ChatGPTCollector:
 YouTube動画が存在しない、または不明な場合は「不明」と回答してください。"""
             
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=OPENAI_MODEL_GPT4O,
                 messages=[
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=500,
-                temperature=0.1
+                max_tokens=CHATGPT_KEYWORD_MAX_TOKENS,
+                temperature=SPEECH_PATTERN_EXTRACTION_TEMPERATURE
             )
             
             result_text = response.choices[0].message.content.strip()
@@ -333,7 +351,7 @@ YouTube動画が存在しない、または不明な場合は「不明」と回�
                     if keyword and keyword != '[説明]':
                         keywords.append(keyword)
             
-            return keywords[:5]  # 最大5個まで
+            return keywords[:CHATGPT_MAX_KEYWORDS]  # 最大5個まで
             
         except Exception as e:
             print(f"    YouTube キーワード取得エラー: {e}")

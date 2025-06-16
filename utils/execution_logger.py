@@ -8,7 +8,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
-from config import config
+
+from config import JSON_INDENT_LEVEL
 
 
 class ExecutionLogger:
@@ -152,13 +153,20 @@ class ExecutionLogger:
             # セッション別のログファイル
             log_file = self.cache_dir / f"execution_log_{self.session_id}.json"
             
+            # ログ保存時の進捗を表示
+            print(f"  💾 ログ更新中: {log_file.name}")
+            
             with open(log_file, 'w', encoding='utf-8') as f:
-                json.dump(self.execution_log, f, ensure_ascii=False, indent=2)
+                json.dump(self.execution_log, f, ensure_ascii=False, indent=JSON_INDENT_LEVEL)
+                f.flush()  # 強制的にバッファをフラッシュ
+                os.fsync(f.fileno())  # OSレベルでの書き込み強制
             
             # 最新ログのシンボリックリンク的な役割
             latest_log_file = self.cache_dir / "latest_execution_log.json"
             with open(latest_log_file, 'w', encoding='utf-8') as f:
-                json.dump(self.execution_log, f, ensure_ascii=False, indent=2)
+                json.dump(self.execution_log, f, ensure_ascii=False, indent=JSON_INDENT_LEVEL)
+                f.flush()  # 強制的にバッファをフラッシュ
+                os.fsync(f.fileno())  # OSレベルでの書き込み強制
                 
         except Exception as e:
             print(f"⚠️ ログ保存エラー: {e}")

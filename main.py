@@ -10,7 +10,14 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, Any, Union, Optional
+from dotenv import load_dotenv
 from utils.execution_logger import ExecutionLogger
+from config import (DISPLAY_SEPARATOR_LENGTH, DISPLAY_EMOJI_REPEAT_COUNT, 
+                    ERROR_WAIT_TIME_HOURS_MIN, ERROR_WAIT_TIME_HOURS_MAX,
+                    DISPLAY_SEPARATOR_CHAR, DISPLAY_EMOJI_SHIELD, DISPLAY_EMOJI_MASK)
+
+# .envファイルから環境変数を読み込み
+load_dotenv()
 
 def main():
     """メイン関数"""
@@ -54,11 +61,6 @@ def main():
         "--use-chatgpt-search",
         action="store_true",
         help="Web検索の代わりにChatGPTの知識ベースから情報を取得"
-    )
-    parser.add_argument(
-        "--no-realtime",
-        action="store_true",
-        help="リアルタイム進捗表示を無効にする"
     )
     
     args = parser.parse_args()
@@ -134,8 +136,7 @@ def main():
             use_google=not args.no_google, 
             use_duckduckgo=args.use_duckduckgo, 
             use_bing=args.use_bing, 
-            use_chatgpt_search=args.use_chatgpt_search,
-            use_realtime_display=not args.no_realtime
+            use_chatgpt_search=args.use_chatgpt_search
         )
         
         collection_duration = time.time() - start_time
@@ -174,33 +175,33 @@ def main():
         logger.set_final_result(final_result)
         
         # 結果出力
-        print("\n" + "="*60)
+        print("\n" + DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH)
         print("生成されたプロンプト:")
-        print("="*60)
+        print(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH)
         print(final_prompt)
-        print("="*60)
+        print(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH)
         
         # コンテンツポリシー対応版プロンプトの表示
         if policy_safe_prompt and policy_safe_prompt.get("safe_prompt"):
-            print("\n" + "🛡️ "*20)
+            print("\n" + f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT)
             print("コンテンツポリシー対応版プロンプト:")
-            print("🛡️ "*20)
+            print(f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT)
             print(policy_safe_prompt["safe_prompt"])
-            print("🛡️ "*20)
+            print(f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT)
         
         # キャラクター自己紹介の表示
         if character_introduction and character_introduction.get("introduction_text"):
-            print("\n" + "🎭 "*20)
+            print("\n" + f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT)
             print(f"{args.name}による自己紹介:")
-            print("🎭 "*20)
+            print(f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT)
             print(character_introduction["introduction_text"])
-            print("🎭 "*20)
+            print(f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT)
         
         # 自動的に最終プロンプトを.txtファイルに出力（日時付き）
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = args.name.replace(' ', '_').replace('/', '_')
-        prompt_filename = f"prompt_{safe_name}_{timestamp}.txt"
+        prompt_filename = f"prompt_{timestamp}_{safe_name}.txt"
         
         # 実行したコマンドを構築
         command_parts = ["python main.py", f'"{args.name}"']
@@ -221,34 +222,34 @@ def main():
         executed_command = " ".join(command_parts)
         
         with open(prompt_filename, 'w', encoding='utf-8') as f:
-            f.write("="*60 + "\n")
+            f.write(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH + "\n")
             f.write(f"キャラクター口調プロンプト: {args.name}\n")
             f.write(f"生成日時: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}\n")
             f.write(f"実行コマンド: {executed_command}\n")
-            f.write("="*60 + "\n\n")
+            f.write(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH + "\n\n")
             f.write(final_prompt)
             f.write("\n\n")
             
             # コンテンツポリシー対応版プロンプトも含める
             if policy_safe_prompt and policy_safe_prompt.get("safe_prompt"):
-                f.write("🛡️ "*20 + "\n")
+                f.write(f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n")
                 f.write("コンテンツポリシー対応版プロンプト:\n")
-                f.write("🛡️ "*20 + "\n\n")
+                f.write(f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n\n")
                 f.write(policy_safe_prompt["safe_prompt"])
                 f.write("\n\n")
             
             # 自己紹介も含める
             if character_introduction and character_introduction.get("introduction_text"):
-                f.write("🎭 "*20 + "\n")
+                f.write(f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n")
                 f.write(f"{args.name}による自己紹介:\n")
-                f.write("🎭 "*20 + "\n\n")
+                f.write(f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n\n")
                 f.write(character_introduction["introduction_text"])
                 f.write("\n\n")
             
             # 実行情報のサマリーを追加
-            f.write("="*60 + "\n")
+            f.write(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH + "\n")
             f.write("実行情報サマリー:\n")
-            f.write("="*60 + "\n")
+            f.write(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH + "\n")
             f.write(f"検索エンジン: ")
             if args.use_chatgpt_search:
                 f.write("ChatGPT知識ベース\n")
@@ -272,27 +273,27 @@ def main():
         # 追加のファイル出力（ユーザー指定）
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
-                f.write("="*60 + "\n")
+                f.write(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH + "\n")
                 f.write("生成されたプロンプト:\n")
-                f.write("="*60 + "\n")
+                f.write(DISPLAY_SEPARATOR_CHAR*DISPLAY_SEPARATOR_LENGTH + "\n")
                 f.write(final_prompt)
-                f.write("\n" + "="*60 + "\n\n")
+                f.write("\n" + "="*DISPLAY_SEPARATOR_LENGTH + "\n\n")
                 
                 # コンテンツポリシー対応版も含める
                 if policy_safe_prompt and policy_safe_prompt.get("safe_prompt"):
-                    f.write("🛡️ "*20 + "\n")
+                    f.write(f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n")
                     f.write("コンテンツポリシー対応版プロンプト:\n")
-                    f.write("🛡️ "*20 + "\n")
+                    f.write(f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n")
                     f.write(policy_safe_prompt["safe_prompt"])
-                    f.write("\n" + "🛡️ "*20 + "\n\n")
+                    f.write("\n" + f"{DISPLAY_EMOJI_SHIELD} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n\n")
                 
                 # 自己紹介も含める
                 if character_introduction and character_introduction.get("introduction_text"):
-                    f.write("🎭 "*20 + "\n")
+                    f.write(f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n")
                     f.write(f"{args.name}による自己紹介:\n")
-                    f.write("🎭 "*20 + "\n")
+                    f.write(f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n")
                     f.write(character_introduction["introduction_text"])
-                    f.write("\n" + "🎭 "*20 + "\n")
+                    f.write("\n" + f"{DISPLAY_EMOJI_MASK} "*DISPLAY_EMOJI_REPEAT_COUNT + "\n")
             print(f"\n✅ 通常版・ポリシー対応版プロンプトと自己紹介を {args.output} に保存しました。")
             logger.log_step("file_output", "success", {"output_file": args.output})
         
@@ -318,7 +319,7 @@ def main():
             print("\n💡 Google検索でレート制限エラーが発生しました。以下をお試しください:")
             print("   1. Bing検索に切り替え: --use-bing フラグを追加")
             print("   2. Web検索を無効化: --no-google フラグを追加") 
-            print("   3. 時間を置いて再実行（1-2時間後）")
+            print(f"   3. 時間を置いて再実行（{ERROR_WAIT_TIME_HOURS_MIN}-{ERROR_WAIT_TIME_HOURS_MAX}時間後）")
             print(f"   例: python main.py \"{args.name}\" --use-bing --api-key \"your-key\"")
         elif "No module named" in error_msg:
             print(f"\n💡 依存関係が不足しています:")

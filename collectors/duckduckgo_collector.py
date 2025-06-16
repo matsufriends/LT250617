@@ -5,25 +5,40 @@ DuckDuckGo検索モジュール（Google検索の代替）
 import requests
 import time
 from bs4 import BeautifulSoup
-from typing import List, Dict, Any
-from config import config
+from typing import List, Dict, Any, Optional
+from core.interfaces import SearchEngineCollector, CollectionResult, SearchResult
+from utils.execution_logger import ExecutionLogger
+from config import (
+    get_search_patterns,
+    DEFAULT_DELAY,
+    REQUEST_TIMEOUT,
+    HTTP_STATUS_OK,
+    SAMPLE_QUALITY_MIN_LENGTH,
+    SAMPLE_PHRASES_MAX,
+    DEFAULT_USER_AGENT,
+    PREVIEW_LENGTH_LONG,
+    PREVIEW_LENGTH_MEDIUM,
+    PREVIEW_LENGTH_TITLE,
+    TITLE_MIN_LENGTH,
+    HTTP_STATUS_ACCEPTED
+)
 
-class DuckDuckGoCollector:
+class DuckDuckGoCollector(SearchEngineCollector):
     """DuckDuckGo検索でGoogle検索の代替を提供"""
     
-    def __init__(self, delay: float = 5.0):  # レート制限対策で大幅延長
+    def __init__(self, delay: float = DEFAULT_DELAY, **kwargs):  # レート制限対策で大幅延長
         """
         初期化
         
         Args:
             delay: リクエスト間の待機時間（秒）
         """
-        self.delay = delay
+        super().__init__(delay, **kwargs)
         self.session = requests.Session()
         
         # より現実的なブラウザヘッダーを設定
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': DEFAULT_USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -39,7 +54,7 @@ class DuckDuckGoCollector:
             'sec-ch-ua-platform': '"macOS"'
         })
     
-    def collect_info(self, name: str, logger=None, api_key: str = None) -> Dict[str, Any]:
+    def collect_info(self, name: str, logger: Optional[ExecutionLogger] = None, api_key: Optional[str] = None, **kwargs) -> CollectionResult:
         """
         DuckDuckGoからキャラクター情報を収集
         
@@ -52,7 +67,7 @@ class DuckDuckGoCollector:
             収集結果の辞書
         """
         try:
-            search_patterns = config.search.get_search_patterns(name)
+            search_patterns = get_search_patterns(name)
             all_results = []
             
             print(f"  DuckDuckGo検索パターン: {len(search_patterns)}個")
@@ -73,21 +88,31 @@ class DuckDuckGoCollector:
             
             print(f"  DuckDuckGo検索結果: {len(all_results)}件取得")
             
-            return {
-                "found": len(all_results) > 0,
-                "error": None,
-                "query": "複数パターン検索（DuckDuckGo）",
-                "results": all_results,
-                "total_results": len(all_results)
-            }
+            # SearchResultオブジェクトに変換
+            search_result_objects = []
+            for result_dict in all_results:
+                try:
+                    search_result = SearchResult(
+                        url=result_dict.get("url", ""),
+                        title=result_dict.get("title", ""),
+                        description=result_dict.get("description", ""),
+                        content=result_dict.get("content", ""),
+                        domain=result_dict.get("domain", ""),
+                        content_length=result_dict.get("content_length", 0),
+                        speech_patterns=result_dict.get("speech_patterns", []),
+                        source="duckduckgo",
+                        search_query="複数パターン検索（DuckDuckGo）"
+                    )
+                    search_result_objects.append(search_result)
+                except Exception as e:
+                    if logger:
+                        logger.log_error("search_result_conversion_error", str(e), result_dict)
+                    continue
+            
+            return self._create_success_result(search_result_objects, "複数パターン検索（DuckDuckGo）")
             
         except Exception as e:
-            return {
-                "found": False,
-                "error": f"DuckDuckGo検索エラー: {str(e)}",
-                "results": [],
-                "total_results": 0
-            }
+            return self._create_error_result(f"DuckDuckGo検索エラー: {str(e)}", "複数パターン検索（DuckDuckGo）")
     
     def _search_pattern(self, query: str, character_name: str = "", api_key: str = None) -> List[Dict[str, Any]]:
         """
@@ -149,18 +174,18 @@ class DuckDuckGoCollector:
         print(f"      リクエストURL: {search_url}")
         print(f"      パラメータ: {params}")
         
-        response = self.session.get(search_url, params=params, timeout=15)
+        response = self.session.get(search_url, params=params, timeout=REQUEST_TIMEOUT)
         print(f"      レスポンス: HTTP {response.status_code}")
         print(f"      コンテンツ長: {len(response.text)}文字")
         
-        if response.status_code == 200:
+        if response.status_code == HTTP_STATUS_OK:
             # レスポンスの先頭100文字を表示（デバッグ用）
-            response_preview = response.text[:200].replace('\n', ' ').strip()
+            response_preview = response.text[:PREVIEW_LENGTH_LONG].replace('\n', ' ').strip()
             print(f"      レスポンス先頭: {response_preview}...")
             
             results = self._parse_duckduckgo_results(response.text, character_name, api_key)
             return results
-        elif response.status_code == 202:
+        elif response.status_code == HTTP_STATUS_ACCEPTED:
             print(f"      HTTP 202: 処理中（結果は後で利用可能）")
             return []
         else:
@@ -178,11 +203,11 @@ class DuckDuckGoCollector:
         }
         
         print(f"      Lite URL: {search_url}")
-        response = self.session.get(search_url, params=params, timeout=15)
+        response = self.session.get(search_url, params=params, timeout=REQUEST_TIMEOUT)
         print(f"      Lite レスポンス: HTTP {response.status_code}")
         
-        if response.status_code == 200:
-            response_preview = response.text[:200].replace('\n', ' ').strip()
+        if response.status_code == HTTP_STATUS_OK:
+            response_preview = response.text[:PREVIEW_LENGTH_LONG].replace('\n', ' ').strip()
             print(f"      Lite レスポンス先頭: {response_preview}...")
             
             results = self._parse_lite_results(response.text, character_name, api_key)
@@ -201,11 +226,11 @@ class DuckDuckGoCollector:
         }
         
         print(f"      シンプル URL: {search_url}")
-        response = self.session.get(search_url, params=params, timeout=15)
+        response = self.session.get(search_url, params=params, timeout=REQUEST_TIMEOUT)
         print(f"      シンプル レスポンス: HTTP {response.status_code}")
         
-        if response.status_code == 200:
-            response_preview = response.text[:200].replace('\n', ' ').strip()
+        if response.status_code == HTTP_STATUS_OK:
+            response_preview = response.text[:PREVIEW_LENGTH_LONG].replace('\n', ' ').strip()
             print(f"      シンプル レスポンス先頭: {response_preview}...")
             
             results = self._parse_simple_results(response.text, character_name)
@@ -267,7 +292,7 @@ class DuckDuckGoCollector:
                             description = desc_element.get_text(strip=True) if desc_element else ""
                             
                             if title and url:
-                                print(f"        結果発見: {title[:50]}...")
+                                print(f"        結果発見: {title[:PREVIEW_LENGTH_MEDIUM]}...")
                                 content_info = {
                                     "url": url,
                                     "domain": self._extract_domain(url),
@@ -293,16 +318,16 @@ class DuckDuckGoCollector:
                 all_links = soup.find_all('a', href=True)
                 print(f"      全リンク数: {len(all_links)}")
                 
-                for link in all_links[:20]:  # 最初の20個のリンクをチェック
+                for link in all_links[:SAMPLE_PHRASES_MAX]:  # 最初のリンクをチェック
                     href = link.get('href', '')
                     title = link.get_text(strip=True)
                     
                     # 有効な外部リンクかチェック
                     if (href.startswith('http') and 
                         'duckduckgo' not in href and 
-                        title and len(title) > 5):
+                        title and len(title) > SAMPLE_QUALITY_MIN_LENGTH):
                         
-                        print(f"        フォールバックリンク: {title[:30]}...")
+                        print(f"        フォールバックリンク: {title[:PREVIEW_LENGTH_TITLE]}...")
                         content_info = {
                             "url": href,
                             "domain": self._extract_domain(href),
@@ -342,7 +367,7 @@ class DuckDuckGoCollector:
                 title = link.get_text(strip=True)
                 
                 # 有効なURLのみを処理
-                if href and href.startswith('http') and title and len(title) > 5:
+                if href and href.startswith('http') and title and len(title) > SAMPLE_QUALITY_MIN_LENGTH:
                     content_info = {
                         "url": href,
                         "domain": self._extract_domain(href),
@@ -380,7 +405,7 @@ class DuckDuckGoCollector:
                 # 外部リンクのみを処理
                 if (href.startswith('http') and 
                     'duckduckgo' not in href and 
-                    title and len(title) > 10 and 
+                    title and len(title) > TITLE_MIN_LENGTH and 
                     character_name.lower() in title.lower()):
                     
                     content_info = {
@@ -403,46 +428,4 @@ class DuckDuckGoCollector:
         
         return results
     
-    def _extract_domain(self, url: str) -> str:
-        """URLからドメインを抽出"""
-        try:
-            from urllib.parse import urlparse
-            return urlparse(url).netloc
-        except:
-            return "unknown"
     
-    def _extract_basic_patterns(self, text: str, character_name: str) -> List[str]:
-        """
-        テキストから基本的な話し方パターンを抽出
-        
-        Args:
-            text: 対象テキスト
-            character_name: キャラクター名
-            
-        Returns:
-            抽出されたパターンのリスト
-        """
-        patterns = []
-        
-        try:
-            if not text:
-                return patterns
-            
-            # 基本的なパターン抽出（regex不使用で中立的）
-            text_lower = text.lower()
-            
-            # キャラクター名の言及があるかチェック
-            if character_name and character_name.lower() in text_lower:
-                patterns.append(f"呼び方: {character_name}")
-            
-            # 簡単な特徴抽出（API不使用）
-            if "口調" in text or "語尾" in text:
-                patterns.append("表現: 口調・語尾に関する情報")
-            
-            if "一人称" in text or "話し方" in text:
-                patterns.append("表現: 話し方に関する情報")
-                
-        except Exception as e:
-            print(f"パターン抽出エラー: {e}")
-        
-        return patterns
