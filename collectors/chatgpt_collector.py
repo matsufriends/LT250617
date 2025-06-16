@@ -4,7 +4,7 @@ ChatGPT知識ベース検索モジュール
 
 import time
 from typing import List, Dict, Any
-from config import get_search_patterns
+from config import config
 
 class ChatGPTCollector:
     """ChatGPTの知識ベースからキャラクター情報を収集するクラス"""
@@ -42,7 +42,7 @@ class ChatGPTCollector:
             print(f"  ChatGPT知識ベース検索: {name}")
             
             # 検索パターンを使用してChatGPTに情報を問い合わせ
-            search_patterns = get_search_patterns(name)
+            search_patterns = config.search.get_search_patterns(name)
             all_results = []
             
             for i, pattern in enumerate(search_patterns, 1):

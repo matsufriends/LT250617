@@ -118,28 +118,3 @@ class AppConfig:
 # グローバル設定インスタンス
 config = AppConfig.load()
 
-# 後方互換性のための定数（段階的に廃止予定）
-GOOGLE_SEARCH_RESULTS = config.search.google_results
-GOOGLE_REQUEST_DELAY = config.search.google_delay
-GOOGLE_PAGE_CONTENT_LIMIT = config.search.google_page_limit
-YOUTUBE_MAX_URLS = config.search.youtube_max_urls
-YOUTUBE_MAX_VIDEOS = config.search.youtube_max_videos
-YOUTUBE_MAX_TRANSCRIPTS = config.search.youtube_max_transcripts
-YOUTUBE_TRANSCRIPT_CHAR_LIMIT = config.search.youtube_transcript_limit
-YOUTUBE_SEARCH_DELAY = config.search.youtube_search_delay
-CHATGPT_MODEL = config.api.openai_model
-CHATGPT_MAX_TOKENS = config.api.openai_max_tokens
-CHATGPT_TEMPERATURE = config.api.openai_temperature
-CHATGPT_FILTER_MAX_TOKENS = config.api.openai_filter_max_tokens
-CHATGPT_FILTER_TEMPERATURE = config.api.openai_filter_temperature
-CHATGPT_FILTER_TEXT_LIMIT = config.processing.chatgpt_filter_text_limit
-WIKIPEDIA_SUMMARY_LIMIT = config.collector.wikipedia_summary_limit
-WIKIPEDIA_FALLBACK_LIMIT = config.collector.wikipedia_fallback_limit
-MAX_KEY_INFORMATION = config.processing.max_key_information
-MAX_SAMPLE_PHRASES_DISPLAY = config.processing.max_sample_phrases_display
-SAMPLE_PHRASES_MAX = config.processing.sample_phrases_max
-
-
-def get_search_patterns(name: str) -> List[str]:
-    """キャラクター検索用パターンを取得（後方互換性）"""
-    return config.search.get_search_patterns(name)

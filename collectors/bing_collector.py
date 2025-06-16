@@ -8,9 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any
 from urllib.parse import urlparse, quote_plus
-from config import (
-    GOOGLE_PAGE_CONTENT_LIMIT, get_search_patterns
-)
+from config import config
 
 
 class BingCollector:
@@ -46,7 +44,7 @@ class BingCollector:
             all_search_results = []
             
             # 共通の検索パターンを使用
-            search_patterns = get_search_patterns(name)
+            search_patterns = config.search.get_search_patterns(name)
             
             results_per_pattern = max(1, num_results // len(search_patterns))
             
@@ -239,8 +237,12 @@ class BingCollector:
                 else:
                     url = 'https://' + url
             
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
+            # 共通HTTPクライアントを使用してリクエストを実行
+            from utils.http_client import safe_http_get
+            response = safe_http_get(url, max_retries=2, timeout=15, logger=None, quiet=True)  # 一般的なHTTPエラーはログに記録せず、出力も抑制
+            
+            if not response:
+                return None
             
             soup = BeautifulSoup(response.content, 'html.parser')
             domain = urlparse(url).netloc  # ドメイン情報を先に取得
@@ -266,7 +268,7 @@ class BingCollector:
             body_text = ' '.join(chunk for chunk in chunks if chunk)
             
             # テキストを制限
-            body_text = body_text[:GOOGLE_PAGE_CONTENT_LIMIT] if body_text else ""
+            body_text = body_text[:config.search.google_page_limit] if body_text else ""
             
             # 口調・セリフ関連の文をChatGPT APIで抽出（API keyがある場合のみ）
             speech_patterns = []
@@ -317,7 +319,7 @@ class BingCollector:
             youtube_urls = []
             
             for search_query in search_queries:
-                if len(youtube_urls) >= 50:  # YOUTUBE_MAX_URLS相当
+                if len(youtube_urls) >= config.search.youtube_max_urls:
                     break
                     
                 print(f"YouTube検索中（Bing）: {search_query}")
@@ -332,7 +334,7 @@ class BingCollector:
                             youtube_urls.append(url)
                             print(f"  - 動画URL発見: {url}")
                         
-                        if len(youtube_urls) >= 50:  # YOUTUBE_MAX_URLS相当
+                        if len(youtube_urls) >= config.search.youtube_max_urls:
                             break
                         
                 except Exception as search_error:

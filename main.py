@@ -55,6 +55,11 @@ def main():
         action="store_true",
         help="Web検索の代わりにChatGPTの知識ベースから情報を取得"
     )
+    parser.add_argument(
+        "--no-realtime",
+        action="store_true",
+        help="リアルタイム進捗表示を無効にする"
+    )
     
     args = parser.parse_args()
     
@@ -129,7 +134,8 @@ def main():
             use_google=not args.no_google, 
             use_duckduckgo=args.use_duckduckgo, 
             use_bing=args.use_bing, 
-            use_chatgpt_search=args.use_chatgpt_search
+            use_chatgpt_search=args.use_chatgpt_search,
+            use_realtime_display=not args.no_realtime
         )
         
         collection_duration = time.time() - start_time

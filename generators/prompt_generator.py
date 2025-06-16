@@ -4,17 +4,13 @@
 
 import openai
 from typing import Dict, Any
-from config import (
-    CHATGPT_MODEL, CHATGPT_MAX_TOKENS, CHATGPT_TEMPERATURE,
-    WIKIPEDIA_SUMMARY_LIMIT, WIKIPEDIA_FALLBACK_LIMIT,
-    MAX_KEY_INFORMATION, MAX_SAMPLE_PHRASES_DISPLAY
-)
+from config import config
 
 
 class PromptGenerator:
     """収集した情報からChatGPT用プロンプトを生成するクラス"""
     
-    def __init__(self, api_key: str, model: str = CHATGPT_MODEL):
+    def __init__(self, api_key: str, model: str = None):
         """
         初期化
         
@@ -23,7 +19,7 @@ class PromptGenerator:
             model: 使用するモデル名
         """
         self.client = openai.OpenAI(api_key=api_key)
-        self.model = model
+        self.model = model or config.api.openai_model
     
     def generate_voice_prompt(self, character_info: Dict[str, Any], logger=None) -> str:
         """
@@ -52,8 +48,8 @@ class PromptGenerator:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=CHATGPT_MAX_TOKENS,
-                temperature=CHATGPT_TEMPERATURE
+                max_tokens=config.api.openai_max_tokens,
+                temperature=config.api.openai_temperature
             )
             
             generated_prompt = response.choices[0].message.content.strip()
@@ -138,7 +134,7 @@ class PromptGenerator:
             if wiki_info.get("title"):
                 organized["key_information"].append(f"正式名称: {wiki_info['title']}")
             if wiki_info.get("categories"):
-                categories = ", ".join(wiki_info["categories"][:MAX_KEY_INFORMATION])
+                categories = ", ".join(wiki_info["categories"][:config.processing.max_key_information])
                 organized["key_information"].append(f"カテゴリ: {categories}")
         
         # Google検索結果の整理
@@ -148,7 +144,7 @@ class PromptGenerator:
             
             # 各検索結果から重要な情報を抽出
             web_speech_patterns = []
-            for result in google_info["results"][:MAX_KEY_INFORMATION]:  # 上位件数のみ
+            for result in google_info["results"][:config.processing.max_key_information]:  # 上位件数のみ
                 if result.get("title"):
                     organized["key_information"].append(f"関連情報: {result['title'][:100]}")
                 
@@ -238,14 +234,14 @@ class PromptGenerator:
         if organized_info["wikipedia_found"]:
             prompt_parts.extend([
                 f"■ 基本情報（Wikipedia）",
-                organized_info["wikipedia_summary"][:WIKIPEDIA_SUMMARY_LIMIT] + "...",
+                organized_info["wikipedia_summary"][:config.collector.wikipedia_summary_limit] + "...",
                 ""
             ])
         
         # 重要な情報
         if organized_info["key_information"]:
             prompt_parts.append("■ 追加の基本情報")
-            for info in organized_info["key_information"][:MAX_KEY_INFORMATION]:  # 重要な件数のみ
+            for info in organized_info["key_information"][:config.processing.max_key_information]:  # 重要な件数のみ
                 prompt_parts.append(f"- {info}")
             prompt_parts.append("")
         
@@ -291,7 +287,7 @@ class PromptGenerator:
                 f"■ 実際の発言サンプル（YouTube動画より）",
                 "以下は動画から抽出された実際の話し方です："
             ])
-            for phrase in organized_info["sample_phrases"][:MAX_SAMPLE_PHRASES_DISPLAY]:  # サンプル数は設定から
+            for phrase in organized_info["sample_phrases"][:config.processing.max_sample_phrases_display]:  # サンプル数は設定から
                 if phrase.strip():
                     prompt_parts.append(f"「{phrase}」")
             prompt_parts.append("")
@@ -391,7 +387,7 @@ class PromptGenerator:
         if organized_info["wikipedia_found"]:
             fallback_parts.extend([
                 "## 基本情報",
-                organized_info["wikipedia_summary"][:WIKIPEDIA_FALLBACK_LIMIT] + "...",
+                organized_info["wikipedia_summary"][:config.collector.wikipedia_fallback_limit] + "...",
                 ""
             ])
         
@@ -573,7 +569,7 @@ class PromptGenerator:
                 messages=[
                     {"role": "user", "content": safety_prompt}
                 ],
-                max_tokens=CHATGPT_MAX_TOKENS,
+                max_tokens=config.api.openai_max_tokens,
                 temperature=0.3  # 安全側に振る
             )
             

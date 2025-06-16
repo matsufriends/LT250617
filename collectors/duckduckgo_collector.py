@@ -6,7 +6,7 @@ import requests
 import time
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any
-from config import get_search_patterns
+from config import config
 
 class DuckDuckGoCollector:
     """DuckDuckGo検索でGoogle検索の代替を提供"""
@@ -52,7 +52,7 @@ class DuckDuckGoCollector:
             収集結果の辞書
         """
         try:
-            search_patterns = get_search_patterns(name)
+            search_patterns = config.search.get_search_patterns(name)
             all_results = []
             
             print(f"  DuckDuckGo検索パターン: {len(search_patterns)}個")

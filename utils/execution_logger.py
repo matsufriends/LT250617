@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
-from config import CHATGPT_MODEL
+from config import config
 
 
 class ExecutionLogger:

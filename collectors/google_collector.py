@@ -49,10 +49,18 @@ class GoogleCollector(SearchEngineCollector):
         })
         
         if self.google_api_key and self.google_cx:
-            print(f"  Google Custom Search API: 有効 (CX: {self.google_cx[:10]}...)")
+            self._safe_print(f"  Google Custom Search API: 有効 (CX: {self.google_cx[:10]}...)")
         else:
-            print(f"  Google Custom Search API: 無効 (フォールバック検索を使用)")
-            print(f"    💡 設定方法: GOOGLE_API_KEY と GOOGLE_CX 環境変数を設定")
+            self._safe_print(f"  Google Custom Search API: 無効 (フォールバック検索を使用)")
+            self._safe_print(f"    💡 設定方法: GOOGLE_API_KEY と GOOGLE_CX 環境変数を設定")
+    
+    def _safe_print(self, *args, **kwargs):
+        """リアルタイム表示を考慮した安全な出力"""
+        try:
+            from utils.output_suppressor import safe_print
+            safe_print(*args, **kwargs)
+        except ImportError:
+            print(*args, **kwargs)
     
     def collect_info(self, name: str, logger: Optional[ExecutionLogger] = None, api_key: Optional[str] = None, num_results: int = None, **kwargs) -> CollectionResult:
         """
@@ -79,23 +87,25 @@ class GoogleCollector(SearchEngineCollector):
                 search_patterns = self._get_search_patterns(name)
                 results_per_pattern = max(1, min(config.search.google_api_results, num_results // len(search_patterns)))  # API制限考慮
                 
-                for pattern in search_patterns:
-                    print(f"Google Custom Search API検索中: {pattern}")
+                for i, pattern in enumerate(search_patterns):
+                    self._safe_print(f"Google Custom Search API検索中 ({i+1}/{len(search_patterns)}): {pattern}")
                     pattern_results = self._search_with_api(pattern, results_per_pattern, name, api_key, logger)
                     all_search_results.extend(pattern_results)
+                    self._safe_print(f"    パターン{i+1}完了: {len(pattern_results)}件取得")
                     
                     # API制限対策で適度な待機
                     time.sleep(self.delay)
             else:
                 # フォールバック: 従来の検索方法
-                print("⚠️  Google Custom Search APIが設定されていません。フォールバック検索を使用します。")
+                self._safe_print("⚠️  Google Custom Search APIが設定されていません。フォールバック検索を使用します。")
                 search_patterns = self._get_search_patterns(name)
                 results_per_pattern = max(1, num_results // len(search_patterns))
                 
-                for pattern in search_patterns:
-                    print(f"Google フォールバック検索中: {pattern}")
+                for i, pattern in enumerate(search_patterns):
+                    self._safe_print(f"Google フォールバック検索中 ({i+1}/{len(search_patterns)}): {pattern}")
                     pattern_results = self._search_single_pattern_fallback(pattern, results_per_pattern, name, api_key, logger)
                     all_search_results.extend(pattern_results)
+                    self._safe_print(f"    パターン{i+1}完了: {len(pattern_results)}件取得")
                     
                     # レート制限対策で大幅待機
                     time.sleep(self.delay * 3)
@@ -168,14 +178,18 @@ class GoogleCollector(SearchEngineCollector):
                 'safe': 'off'  # セーフサーチオフ
             }
             
-            print(f"    API検索実行: {search_query}")
+            self._safe_print(f"    API検索実行: {search_query}")
+            self._safe_print(f"    API URL: {self.api_base_url}")
+            self._safe_print(f"    API Key: {'設定済み' if self.google_api_key else '未設定'}")
+            self._safe_print(f"    CX: {'設定済み' if self.google_cx else '未設定'}")
+            
             response = self.session.get(self.api_base_url, params=params, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
                 
                 if 'items' in data:
-                    print(f"    API結果: {len(data['items'])}件取得")
+                    self._safe_print(f"    API結果: {len(data['items'])}件取得")
                     
                     for item in data['items']:
                         try:
@@ -208,13 +222,13 @@ class GoogleCollector(SearchEngineCollector):
                                 time.sleep(self.delay)
                                 
                         except Exception as e:
-                            print(f"    API結果処理エラー: {e}")
+                            self._safe_print(f"    API結果処理エラー: {e}")
                             continue
                 else:
-                    print(f"    API結果: 検索結果なし")
+                    self._safe_print(f"    API結果: 検索結果なし")
                     
             elif response.status_code == 403:
-                print(f"    API制限エラー: 日次クォータ超過またはAPI Key無効")
+                self._safe_print(f"    API制限エラー: 日次クォータ超過またはAPI Key無効")
                 if logger:
                     logger.log_error("google_api_quota_error", "Google Custom Search API quota exceeded", {
                         "search_query": search_query,
@@ -222,7 +236,7 @@ class GoogleCollector(SearchEngineCollector):
                         "response": response.text[:200]
                     })
             else:
-                print(f"    API検索失敗: HTTP {response.status_code}")
+                self._safe_print(f"    API検索失敗: HTTP {response.status_code}")
                 if logger:
                     logger.log_error("google_api_error", f"Google Custom Search API error: {response.status_code}", {
                         "search_query": search_query,
@@ -231,7 +245,7 @@ class GoogleCollector(SearchEngineCollector):
                     })
                         
         except Exception as e:
-            print(f"    API検索エラー ({search_query}): {e}")
+            self._safe_print(f"    API検索エラー ({search_query}): {e}")
             if logger:
                 logger.log_error("google_api_exception", str(e), {
                     "search_query": search_query,
@@ -254,10 +268,18 @@ class GoogleCollector(SearchEngineCollector):
         """
         search_results = []
         
-        max_retries = 3
-        retry_delay = 30  # 30秒待機
+        max_retries = 2  # リトライ回数を減らして全体の処理時間を短縮
+        retry_delay = 20  # 20秒待機に短縮
+        
+        # パターン全体のタイムアウト（最大90秒）
+        pattern_start_time = time.time()
+        pattern_timeout = 90
         
         for retry in range(max_retries):
+            # パターン全体のタイムアウトチェック
+            if time.time() - pattern_start_time > pattern_timeout:
+                self._safe_print(f"    ⚠️ パターン全体がタイムアウト（{pattern_timeout}秒）のため処理を中断します")
+                break
             try:
                 # Google検索を実行（User-Agent設定付き）
                 search_urls = []
@@ -267,7 +289,7 @@ class GoogleCollector(SearchEngineCollector):
                     # ランダムな待機時間でより人間らしい動作を模倣
                     base_delay = max(self.delay * 3, 10.0)  # 最低10秒待機
                     
-                    print(f"    Google検索実行中（{base_delay}秒間隔で慎重に取得）...")
+                    self._safe_print(f"    Google検索実行中（{base_delay}秒間隔で慎重に取得）...")
                     
                     # googlesearch-pythonのUser-Agent設定を試行
                     import googlesearch
@@ -276,34 +298,56 @@ class GoogleCollector(SearchEngineCollector):
                     search_timeout = False
                     start_search_time = time.time()
                     
-                    for url in search(
-                        search_query, 
-                        num=max_results, 
-                        stop=max_results, 
-                        pause=base_delay,
-                        lang='ja',  # 日本語検索を明示
-                        safe='off',  # セーフサーチオフ
-                        country='jp'  # 日本からの検索を明示
-                    ):
-                        # 検索時間のチェック（60秒でタイムアウト）
-                        if time.time() - start_search_time > 60:
-                            print(f"    ⚠️ 検索処理がタイムアウト（60秒）のため中断します")
-                            search_timeout = True
-                            break
-                        search_urls.append(url)
-                        print(f"    URL取得: {url}")
+                    # タイムアウト付きの検索を実行
+                    search_results_iter = None
+                    try:
+                        # concurrent.futuresを使って検索にタイムアウトを設定
+                        import concurrent.futures
+                        import signal
                         
-                        if len(search_urls) >= max_results:
-                            break
+                        def search_with_timeout():
+                            try:
+                                return list(search(
+                                    search_query, 
+                                    num=max_results, 
+                                    stop=max_results, 
+                                    pause=base_delay,
+                                    lang='ja',  # 日本語検索を明示
+                                    safe='off',  # セーフサーチオフ
+                                    country='jp'  # 日本からの検索を明示
+                                ))
+                            except Exception as e:
+                                self._safe_print(f"    検索関数内エラー: {e}")
+                                return []
                         
-                        # 追加のランダム待機（Bot検出回避）
-                        extra_delay = random.uniform(2.0, 5.0)
-                        total_delay = base_delay + extra_delay
-                        print(f"    次のURL取得まで {total_delay:.1f}秒待機...")
-                        time.sleep(extra_delay)
+                        # 60秒のタイムアウトで検索実行
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                            future = executor.submit(search_with_timeout)
+                            try:
+                                search_results = future.result(timeout=60)
+                                self._safe_print(f"    検索完了: {len(search_results)}件のURL取得")
+                                
+                                for url in search_results:
+                                    search_urls.append(url)
+                                    self._safe_print(f"    URL取得: {url}")
+                                    
+                                    if len(search_urls) >= max_results:
+                                        break
+                                    
+                                    # 適度な待機
+                                    time.sleep(1.0)
+                                    
+                            except concurrent.futures.TimeoutError:
+                                self._safe_print(f"    ⚠️ 検索処理がタイムアウト（60秒）のため中断します")
+                                search_timeout = True
+                                future.cancel()
+                                
+                    except Exception as search_setup_error:
+                        self._safe_print(f"    検索セットアップエラー: {search_setup_error}")
+                        search_timeout = True
                     
                     if search_timeout:
-                        print(f"    ⚠️ 検索がタイムアウトしました。取得済みURL: {len(search_urls)}件")
+                        self._safe_print(f"    ⚠️ 検索がタイムアウトしました。取得済みURL: {len(search_urls)}件")
                         if logger:
                             logger.log_error("google_search_timeout", "検索処理が60秒でタイムアウト", {
                                 "search_query": search_query,
@@ -311,7 +355,7 @@ class GoogleCollector(SearchEngineCollector):
                             })
                         
                 except Exception as search_lib_error:
-                    print(f"    googlesearch-pythonライブラリエラー: {search_lib_error}")
+                    self._safe_print(f"    googlesearch-pythonライブラリエラー: {search_lib_error}")
                     # フォールバック：直接Google検索を試行
                     search_urls = self._fallback_google_search(search_query, max_results)
                 
@@ -327,7 +371,7 @@ class GoogleCollector(SearchEngineCollector):
                         time.sleep(self.delay * 2)
                         
                     except Exception as e:
-                        print(f"URL取得エラー ({url}): {e}")
+                        self._safe_print(f"URL取得エラー ({url}): {e}")
                         if logger:
                             logger.log_error("url_extraction_error", str(e), {"url": url, "search_query": search_query})
                         continue
@@ -452,8 +496,12 @@ class GoogleCollector(SearchEngineCollector):
                 else:
                     url = 'https://' + url
             
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
+            # 共通HTTPクライアントを使用してリクエストを実行
+            from utils.http_client import safe_http_get
+            response = safe_http_get(url, max_retries=2, timeout=15, logger=None, quiet=True)  # 一般的なHTTPエラーはログに記録せず、出力も抑制
+            
+            if not response:
+                return None
             
             soup = BeautifulSoup(response.content, 'html.parser')
             domain = self._extract_domain(url)  # ドメイン情報を先に取得
