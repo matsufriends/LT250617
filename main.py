@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Dict, Any, Union, Optional
 from utils.execution_logger import ExecutionLogger
 
 def main():
@@ -34,8 +35,34 @@ def main():
         action="store_true",
         help="YouTube字幕からの情報収集を無効にする"
     )
+    parser.add_argument(
+        "--no-google",
+        action="store_true",
+        help="Google検索からの情報収集を無効にする（レート制限回避）"
+    )
+    parser.add_argument(
+        "--use-duckduckgo",
+        action="store_true",
+        help="Google検索の代わりにDuckDuckGo検索を使用"
+    )
+    parser.add_argument(
+        "--use-bing",
+        action="store_true",
+        help="Google検索の代わりにBing検索を使用"
+    )
+    parser.add_argument(
+        "--use-chatgpt-search",
+        action="store_true",
+        help="Web検索の代わりにChatGPTの知識ベースから情報を取得"
+    )
     
     args = parser.parse_args()
+    
+    # 検索エンジンフラグの競合チェック
+    search_flags = [args.use_duckduckgo, args.use_bing, args.use_chatgpt_search]
+    if sum(search_flags) > 1:
+        print("エラー: 検索エンジンオプション（--use-duckduckgo, --use-bing, --use-chatgpt-search）は同時に指定できません。")
+        sys.exit(1)
     
     # 実行ログ開始
     logger = ExecutionLogger()
@@ -54,13 +81,57 @@ def main():
     logger.log_step("api_key_verification", "success", {"api_key_source": "args" if args.api_key else "env"})
     
     print(f"=== キャラクター口調プロンプト生成: {args.name} ===")
+    
+    # 検索エンジン選択の表示
+    if args.use_chatgpt_search:
+        print("🤖 検索エンジン: ChatGPT知識ベース（完全AI検索）")
+        print("    ✨ Web検索不要でレート制限なし、2023年4月までの知識を使用")
+    elif args.use_bing:
+        print("🔍 検索エンジン: Bing（Google制限回避）")
+    elif args.use_duckduckgo:
+        print("🦆 検索エンジン: DuckDuckGo（実験的）")
+        print("    💡 202エラーが出る場合は --use-bing への切り替えを推奨")
+    elif not args.no_google:
+        print("🔍 検索エンジン: Google")
+        # Google Custom Search API の設定状況を表示
+        google_api_key = os.environ.get("GOOGLE_API_KEY")
+        google_cx = os.environ.get("GOOGLE_CX")
+        if google_api_key and google_cx:
+            print("    ✅ Google Custom Search API: 設定済み（安定動作）")
+        else:
+            print("    ⚠️  Google Custom Search API: 未設定（429エラーの可能性）")
+            print("    💡 安定動作のため以下環境変数の設定を推奨:")
+            print("       export GOOGLE_API_KEY=\"your-api-key\"")
+            print("       export GOOGLE_CX=\"your-search-engine-id\"")
+    else:
+        print("🚫 Web検索: 無効")
+    
+    if args.no_youtube:
+        print("🎥 YouTube字幕: 無効")
+    else:
+        print("🎥 YouTube字幕: 有効")
+        if args.use_chatgpt_search:
+            print("    📹 ChatGPT検索でもYouTube字幕収集は利用可能です")
+    
     print()
     
     try:
         # 情報収集
         print("📚 情報収集中...")
         start_time = time.time()
-        character_info = collect_character_info(args.name, api_key=api_key, logger=logger, use_youtube=not args.no_youtube)
+        
+        from core.character_info_service import CharacterInfoService
+        info_service = CharacterInfoService(api_key=api_key)
+        character_info = info_service.collect_character_info(
+            args.name, 
+            logger=logger, 
+            use_youtube=not args.no_youtube, 
+            use_google=not args.no_google, 
+            use_duckduckgo=args.use_duckduckgo, 
+            use_bing=args.use_bing, 
+            use_chatgpt_search=args.use_chatgpt_search
+        )
+        
         collection_duration = time.time() - start_time
         logger.log_step("character_info_collection", "success", character_info, collection_duration)
         logger.log_performance_metric("info_collection_duration", collection_duration, "seconds")
@@ -76,16 +147,22 @@ def main():
         # 結果を統一形式で処理
         if isinstance(prompt_result, dict):
             final_prompt = prompt_result["generated_prompt"]
+            policy_safe_prompt = prompt_result.get("policy_safe_prompt", {})
+            character_introduction = prompt_result.get("character_introduction", {})
             character_info["prompt_generation_api"] = prompt_result["api_interaction"]
         else:
             # 後方互換性のため
             final_prompt = prompt_result
+            policy_safe_prompt = {}
+            character_introduction = {}
         
         # 最終結果をログに記録
         final_result = {
             "character_name": args.name,
             "generated_prompt": final_prompt,
+            "policy_safe_prompt": policy_safe_prompt,
             "prompt_length": len(final_prompt),
+            "character_introduction": character_introduction,
             "character_info": character_info
         }
         logger.set_final_result(final_result)
@@ -97,11 +174,120 @@ def main():
         print(final_prompt)
         print("="*60)
         
-        # ファイル出力
+        # コンテンツポリシー対応版プロンプトの表示
+        if policy_safe_prompt and policy_safe_prompt.get("safe_prompt"):
+            print("\n" + "🛡️ "*20)
+            print("コンテンツポリシー対応版プロンプト:")
+            print("🛡️ "*20)
+            print(policy_safe_prompt["safe_prompt"])
+            print("🛡️ "*20)
+        
+        # キャラクター自己紹介の表示
+        if character_introduction and character_introduction.get("introduction_text"):
+            print("\n" + "🎭 "*20)
+            print(f"{args.name}による自己紹介:")
+            print("🎭 "*20)
+            print(character_introduction["introduction_text"])
+            print("🎭 "*20)
+        
+        # 自動的に最終プロンプトを.txtファイルに出力（日時付き）
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = args.name.replace(' ', '_').replace('/', '_')
+        prompt_filename = f"prompt_{safe_name}_{timestamp}.txt"
+        
+        # 実行したコマンドを構築
+        command_parts = ["python main.py", f'"{args.name}"']
+        if args.api_key:
+            command_parts.append('--api-key "YOUR_API_KEY"')
+        if args.output:
+            command_parts.append(f'--output "{args.output}"')
+        if args.no_youtube:
+            command_parts.append("--no-youtube")
+        if args.no_google:
+            command_parts.append("--no-google")
+        if args.use_duckduckgo:
+            command_parts.append("--use-duckduckgo")
+        if args.use_bing:
+            command_parts.append("--use-bing")
+        if args.use_chatgpt_search:
+            command_parts.append("--use-chatgpt-search")
+        executed_command = " ".join(command_parts)
+        
+        with open(prompt_filename, 'w', encoding='utf-8') as f:
+            f.write("="*60 + "\n")
+            f.write(f"キャラクター口調プロンプト: {args.name}\n")
+            f.write(f"生成日時: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}\n")
+            f.write(f"実行コマンド: {executed_command}\n")
+            f.write("="*60 + "\n\n")
+            f.write(final_prompt)
+            f.write("\n\n")
+            
+            # コンテンツポリシー対応版プロンプトも含める
+            if policy_safe_prompt and policy_safe_prompt.get("safe_prompt"):
+                f.write("🛡️ "*20 + "\n")
+                f.write("コンテンツポリシー対応版プロンプト:\n")
+                f.write("🛡️ "*20 + "\n\n")
+                f.write(policy_safe_prompt["safe_prompt"])
+                f.write("\n\n")
+            
+            # 自己紹介も含める
+            if character_introduction and character_introduction.get("introduction_text"):
+                f.write("🎭 "*20 + "\n")
+                f.write(f"{args.name}による自己紹介:\n")
+                f.write("🎭 "*20 + "\n\n")
+                f.write(character_introduction["introduction_text"])
+                f.write("\n\n")
+            
+            # 実行情報のサマリーを追加
+            f.write("="*60 + "\n")
+            f.write("実行情報サマリー:\n")
+            f.write("="*60 + "\n")
+            f.write(f"検索エンジン: ")
+            if args.use_chatgpt_search:
+                f.write("ChatGPT知識ベース\n")
+            elif args.use_bing:
+                f.write("Bing\n")
+            elif args.use_duckduckgo:
+                f.write("DuckDuckGo\n")
+            elif not args.no_google:
+                f.write("Google\n")
+            else:
+                f.write("なし（Web検索無効）\n")
+            
+            f.write(f"YouTube字幕収集: {'無効' if args.no_youtube else '有効'}\n")
+            f.write(f"出力ファイル: {prompt_filename}\n")
+            if args.output:
+                f.write(f"追加出力: {args.output}\n")
+            f.write(f"セッションID: {logger.session_id}\n")
+        
+        print(f"\n✅ プロンプトを {prompt_filename} に保存しました。")
+        
+        # 追加のファイル出力（ユーザー指定）
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
+                f.write("="*60 + "\n")
+                f.write("生成されたプロンプト:\n")
+                f.write("="*60 + "\n")
                 f.write(final_prompt)
-            print(f"\n✅ 結果を {args.output} に保存しました。")
+                f.write("\n" + "="*60 + "\n\n")
+                
+                # コンテンツポリシー対応版も含める
+                if policy_safe_prompt and policy_safe_prompt.get("safe_prompt"):
+                    f.write("🛡️ "*20 + "\n")
+                    f.write("コンテンツポリシー対応版プロンプト:\n")
+                    f.write("🛡️ "*20 + "\n")
+                    f.write(policy_safe_prompt["safe_prompt"])
+                    f.write("\n" + "🛡️ "*20 + "\n\n")
+                
+                # 自己紹介も含める
+                if character_introduction and character_introduction.get("introduction_text"):
+                    f.write("🎭 "*20 + "\n")
+                    f.write(f"{args.name}による自己紹介:\n")
+                    f.write("🎭 "*20 + "\n")
+                    f.write(character_introduction["introduction_text"])
+                    f.write("\n" + "🎭 "*20 + "\n")
+            print(f"\n✅ 通常版・ポリシー対応版プロンプトと自己紹介を {args.output} に保存しました。")
             logger.log_step("file_output", "success", {"output_file": args.output})
         
         # 実行サマリーを表示
@@ -120,119 +306,27 @@ def main():
         logger.log_error("execution_error", error_msg, {"traceback": str(e)})
         logger.log_step("main_error", "error", {"error": error_msg})
         print(f"❌ エラーが発生しました: {e}")
+        
+        # エラー種別に応じた対処法を表示
+        if "429" in error_msg or "Too Many Requests" in error_msg:
+            print("\n💡 Google検索でレート制限エラーが発生しました。以下をお試しください:")
+            print("   1. Bing検索に切り替え: --use-bing フラグを追加")
+            print("   2. Web検索を無効化: --no-google フラグを追加") 
+            print("   3. 時間を置いて再実行（1-2時間後）")
+            print(f"   例: python main.py \"{args.name}\" --use-bing --api-key \"your-key\"")
+        elif "No module named" in error_msg:
+            print(f"\n💡 依存関係が不足しています:")
+            print(f"   pip install -r requirements.txt")
+        elif "OpenAI" in error_msg or "API" in error_msg:
+            print(f"\n💡 OpenAI API関連のエラーです:")
+            print(f"   - API Keyが正しいか確認してください")
+            print(f"   - API利用制限を確認してください")
+        
+        print(f"\n📋 詳細ログ: cache/latest_execution_log.json")
         sys.exit(1)
 
-def collect_character_info(name: str, api_key: str = None, logger: ExecutionLogger = None, use_youtube: bool = True) -> dict:
-    """キャラクター情報を収集"""
-    from collectors.wikipedia_collector import WikipediaCollector
-    from collectors.google_collector import GoogleCollector
-    from collectors.youtube_collector import YouTubeCollector
-    
-    # キャッシュ機能は廃止（ユーザー要求）
-    # 常にランタイムで新規取得
-    
-    # 情報収集開始
-    character_info = {"name": name}
-    
-    # Wikipedia情報収集
-    print("📖 Wikipedia情報を収集中...")
-    if logger:
-        logger.log_step("wikipedia_collection", "start", {"character_name": name})
-    
-    start_time = time.time()
-    wiki_collector = WikipediaCollector()
-    character_info["wikipedia_info"] = wiki_collector.collect_info(name, logger=logger)
-    wiki_duration = time.time() - start_time
-    
-    if logger:
-        logger.log_step("wikipedia_collection", "success", character_info["wikipedia_info"], wiki_duration)
-        logger.log_performance_metric("wikipedia_duration", wiki_duration, "seconds")
-    
-    # Google検索情報収集
-    print("🔍 Google検索情報を収集中...")
-    if logger:
-        logger.log_step("google_collection", "start", {"character_name": name})
-    
-    start_time = time.time()
-    google_collector = GoogleCollector(delay=1.5)  # 少し長めの待機時間
-    character_info["google_search_results"] = google_collector.collect_info(name, logger=logger, api_key=api_key)
-    google_duration = time.time() - start_time
-    
-    if logger:
-        logger.log_step("google_collection", "success", character_info["google_search_results"], google_duration)
-        logger.log_performance_metric("google_duration", google_duration, "seconds")
-    
-    # YouTube情報収集（オプション）
-    if use_youtube:
-        print("🎥 YouTube情報を収集中...")
-        if logger:
-            logger.log_step("youtube_collection", "start", {"character_name": name})
-        
-        start_time = time.time()
-        youtube_urls = google_collector.search_youtube_videos(name)
-        youtube_collector = YouTubeCollector()
-        youtube_info = youtube_collector.collect_info(youtube_urls, logger=logger)
-        youtube_duration = time.time() - start_time
-        
-        if logger:
-            logger.log_step("youtube_collection", "success", youtube_info, youtube_duration)
-            logger.log_performance_metric("youtube_duration", youtube_duration, "seconds")
-        
-        # キャラクター特定フィルタリング（API Keyがある場合）
-        if youtube_info["found"] and api_key and api_key != "test-key":
-            print("🎯 キャラクター発言の特定中...")
-            if logger:
-                logger.log_step("character_filtering", "start", {"character_name": name})
-            
-            start_time = time.time()
-            all_transcript_text = []
-            for transcript in youtube_info["transcripts"]:
-                all_transcript_text.append(transcript["text"])
-            
-            # ChatGPT APIでキャラクターの発言を特定
-            filter_result = youtube_collector.filter_character_speech(
-                all_transcript_text, name, api_key
-            )
-            filtering_duration = time.time() - start_time
-            
-            if isinstance(filter_result, dict):
-                youtube_info["sample_phrases"] = filter_result["filtered_phrases"]
-                youtube_info["character_filtering_api"] = filter_result["api_interaction"]
-                
-                if logger:
-                    logger.log_api_call(
-                        "openai_filtering",
-                        filter_result["api_interaction"].get("user_prompt", {}),
-                        {"filtered_phrases": filter_result["filtered_phrases"]},
-                        filtering_duration
-                    )
-            else:
-                # 後方互換性のため
-                youtube_info["sample_phrases"] = filter_result
-            
-            if logger:
-                logger.log_step("character_filtering", "success", 
-                              {"filtered_phrases_count": len(youtube_info.get("sample_phrases", []))}, 
-                              filtering_duration)
-                logger.log_performance_metric("filtering_duration", filtering_duration, "seconds")
-        
-        character_info["youtube_transcripts"] = youtube_info
-    else:
-        print("🎥 YouTube情報収集をスキップしました (--no-youtube)")
-        character_info["youtube_transcripts"] = {
-            "found": False,
-            "error": "YouTube情報収集が無効化されています",
-            "transcripts": [],
-            "total_videos": 0,
-            "sample_phrases": [],
-            "skipped": True
-        }
-        if logger:
-            logger.log_step("youtube_collection", "skipped", {"reason": "no-youtube flag"}, 0)
-    
-    return character_info
 
-def generate_voice_prompt(character_info: dict, api_key: str, logger: ExecutionLogger = None):
+def generate_voice_prompt(character_info: Dict[str, Any], api_key: str, logger: Optional[ExecutionLogger] = None) -> Union[str, Dict[str, Any]]:
     """音声プロンプトを生成"""
     from generators.prompt_generator import PromptGenerator
     
@@ -259,6 +353,42 @@ def generate_voice_prompt(character_info: dict, api_key: str, logger: ExecutionL
                 },
                 error=api_info.get("error")
             )
+        
+        # 自己紹介生成のAPI呼び出しもログに記録
+        if isinstance(result, dict) and "character_introduction" in result:
+            intro_info = result["character_introduction"]
+            if "api_interaction" in intro_info:
+                intro_api = intro_info["api_interaction"]
+                logger.log_api_call(
+                    "openai_character_introduction",
+                    {
+                        "prompt": intro_api.get("prompt", ""),
+                        "model": intro_api.get("model", "")
+                    },
+                    {
+                        "introduction_text": intro_info.get("introduction_text", ""),
+                        "introduction_length": len(intro_info.get("introduction_text", ""))
+                    },
+                    error=intro_api.get("error")
+                )
+        
+        # ポリシー対応版生成のAPI呼び出しもログに記録
+        if isinstance(result, dict) and "policy_safe_prompt" in result:
+            policy_info = result["policy_safe_prompt"]
+            if "api_interaction" in policy_info:
+                policy_api = policy_info["api_interaction"]
+                logger.log_api_call(
+                    "openai_policy_safe_prompt",
+                    {
+                        "prompt": policy_api.get("prompt", ""),
+                        "model": policy_api.get("model", "")
+                    },
+                    {
+                        "safe_prompt": policy_info.get("safe_prompt", ""),
+                        "safe_prompt_length": len(policy_info.get("safe_prompt", ""))
+                    },
+                    error=policy_api.get("error")
+                )
     
     return result
 
