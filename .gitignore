@@ -114,5 +114,8 @@ dmypy.json
 cache/
 *.log
 
+# Generated prompt files
+prompt_*.txt
+
 # API keys and sensitive files
 .env
