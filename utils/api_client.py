@@ -11,6 +11,7 @@ from config import (OPENAI_MODEL, OPENAI_MAX_TOKENS, OPENAI_TEMPERATURE,
                     OPENAI_FILTER_MAX_TOKENS, OPENAI_FILTER_TEMPERATURE,
                     OPENAI_SEARCH_MAX_TOKENS, OPENAI_SEARCH_TEMPERATURE)
 from core.exceptions import OpenAIError
+from core.interfaces import CharacterQuote
 from utils.execution_logger import ExecutionLogger
 
 
@@ -274,3 +275,108 @@ class OpenAIClient:
                     "error_type": type(e).__name__
                 })
             return None
+    
+    def extract_character_quotes(
+        self,
+        text: str,
+        character_name: str,
+        source: str = "web",
+        source_url: Optional[str] = None,
+        logger: Optional[ExecutionLogger] = None
+    ) -> List[CharacterQuote]:
+        """
+        テキストからキャラクターの具体的なセリフを抽出
+        
+        Args:
+            text: 対象テキスト
+            character_name: キャラクター名
+            source: ソース種別
+            source_url: ソースURL
+            logger: ログ記録用
+            
+        Returns:
+            CharacterQuoteオブジェクトのリスト
+        """
+        try:
+            if not text or len(text.strip()) < 50:  # 最低50文字必要
+                return []
+            
+            # テキストが長すぎる場合は切り詰め
+            if len(text) > CHATGPT_FILTER_TEXT_LIMIT:
+                text = text[:CHATGPT_FILTER_TEXT_LIMIT]
+            
+            system_prompt = """あなたはテキストから特定キャラクターの具体的なセリフを抽出する専門家です。
+実際にテキストに含まれているセリフのみを抽出し、推測や作成は行わないでください。"""
+            
+            user_prompt = f"""以下のテキストから「{character_name}」の具体的なセリフを抽出してください。
+
+【抽出基準】
+1. 「」や『』などのカギカッコで囲まれたセリフ
+2. {character_name}が言った、話した、と明記されている部分
+3. {character_name}特有の言い回しや語尾を含む文
+4. 明らかに{character_name}のセリフだと判別できるもの
+
+【除外基準】
+- 地の文やナレーション
+- 他のキャラクターのセリフ
+- 一般的な説明文
+- 不明瞭な発言者のセリフ
+
+【出力形式】
+各セリフを1行ずつ、最大10個まで。
+カギカッコは除いてセリフのみを出力。
+
+分析対象テキスト:
+{text}"""
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+            
+            response = self.chat_completion(
+                messages=messages,
+                max_tokens=OPENAI_FILTER_MAX_TOKENS,
+                temperature=0.1,  # 正確性を重視
+                logger=logger,
+                api_type="openai_quote_extraction"
+            )
+            
+            result_text = response["result"]
+            quotes = []
+            
+            # 結果を解析してCharacterQuoteオブジェクトを作成
+            for line in result_text.split('\n'):
+                line = line.strip()
+                if line and len(line) > 5:  # 最低5文字以上
+                    # 信頼性スコアを設定
+                    confidence = 0.6  # デフォルトは中程度
+                    
+                    # キャラクター名が含まれている場合は信頼性アップ
+                    if character_name in text:
+                        confidence = 0.8
+                    
+                    # Wikipediaソースは最も信頼性が高い
+                    if source == "wikipedia":
+                        confidence = 0.9
+                    
+                    quote = CharacterQuote(
+                        text=line,
+                        source=source,
+                        source_url=source_url,
+                        confidence_score=confidence,
+                        context=f"{source}から抽出"
+                    )
+                    quotes.append(quote)
+            
+            return quotes[:10]  # 最大10個まで
+            
+        except Exception as e:
+            if logger:
+                logger.log_error("quote_extraction_error", str(e), {
+                    "character_name": character_name,
+                    "text_length": len(text) if text else 0,
+                    "source": source,
+                    "error_type": type(e).__name__
+                })
+            return []

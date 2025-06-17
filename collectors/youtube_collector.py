@@ -8,6 +8,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from typing import List, Dict, Any
 from urllib.parse import urlparse, parse_qs
+from core.interfaces import CharacterQuote
 from config import (
     YOUTUBE_MAX_VIDEOS, YOUTUBE_MAX_TRANSCRIPTS, YOUTUBE_TRANSCRIPT_LIMIT,
     SAMPLE_PHRASES_MAX, SAMPLE_PHRASE_MIN_LENGTH, SAMPLE_PHRASE_MAX_LENGTH,
@@ -106,12 +107,35 @@ class YouTubeCollector:
             else:
                 print("  ⚠️ サンプルフレーズが抽出されませんでした")
             
+            # CharacterQuoteオブジェクトとしてセリフを整理
+            character_quotes = []
+            for phrase in quality_checked_phrases:
+                # YouTubeソースは基本的に信頼性は中程度
+                # キャラクター名がセリフに含まれるか、APIでフィルタリングされている場合は信頼性を上げる
+                confidence = 0.5  # デフォルト信頼性
+                character_name = character_info.get("name", "") if character_info else ""
+                
+                # キャラクター名がセリフに含まれる場合は信頼性アップ
+                if character_name and character_name in phrase:
+                    confidence = 0.8
+                
+                quote = CharacterQuote(
+                    text=phrase,
+                    source="youtube",
+                    source_url=None,  # 複数の動画から集約されているため
+                    confidence_score=confidence,
+                    context="YouTube動画字幕からChatGPT APIで抽出"
+                )
+                # 辞書形式に変換してから追加（JSON保存のため）
+                character_quotes.append(quote.to_dict())
+            
             return {
                 "found": len(transcripts) > 0,
                 "error": None if len(transcripts) > 0 else "字幕付き動画が見つかりませんでした",
                 "transcripts": transcripts,
                 "total_videos": len(transcripts),
                 "sample_phrases": quality_checked_phrases,
+                "character_quotes": character_quotes,  # CharacterQuoteオブジェクトのリストを追加
                 "processed_urls": len(youtube_urls),
                 "successful_extractions": len(transcripts),
                 "speech_pattern_analysis": pattern_analysis  # 検索パターン相当の分析結果

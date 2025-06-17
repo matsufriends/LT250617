@@ -4,7 +4,7 @@
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from utils.execution_logger import ExecutionLogger
 
@@ -34,6 +34,26 @@ class CollectionResult:
 
 
 @dataclass
+class CharacterQuote:
+    """キャラクターのセリフデータクラス"""
+    text: str  # セリフ本文
+    source: str  # "wikipedia", "web", "youtube" など
+    source_url: Optional[str] = None  # ソースのURL
+    confidence_score: float = 0.5  # 信頼性スコア (0.0-1.0)
+    context: Optional[str] = None  # セリフの文脈
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式に変換"""
+        return {
+            "text": self.text,
+            "source": self.source,
+            "source_url": self.source_url,
+            "confidence_score": self.confidence_score,
+            "context": self.context
+        }
+
+
+@dataclass
 class SearchResult:
     """個別検索結果の標準データクラス"""
     url: str
@@ -43,13 +63,14 @@ class SearchResult:
     domain: str
     content_length: int
     speech_patterns: List[str]
+    character_quotes: Optional[List[CharacterQuote]] = None  # キャラクターの具体的なセリフ
     source: Optional[str] = None
     search_query: Optional[str] = None
     api_duration: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """辞書形式に変換"""
-        return {
+        result = {
             "url": self.url,
             "title": self.title,
             "description": self.description,
@@ -61,6 +82,9 @@ class SearchResult:
             "search_query": self.search_query,
             "api_duration": self.api_duration
         }
+        if self.character_quotes:
+            result["character_quotes"] = [quote.to_dict() for quote in self.character_quotes]
+        return result
 
 
 class BaseCollector(ABC):

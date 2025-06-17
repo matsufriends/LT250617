@@ -153,8 +153,8 @@ class ExecutionLogger:
             # セッション別のログファイル
             log_file = self.cache_dir / f"execution_log_{self.session_id}.json"
             
-            # ログ保存時の進捗を表示
-            print(f"  💾 ログ更新中: {log_file.name}")
+            # ログ保存時の進捗を表示（頻繁すぎるので削除）
+            # print(f"  💾 ログ更新中: {log_file.name}")
             
             with open(log_file, 'w', encoding='utf-8') as f:
                 json.dump(self.execution_log, f, ensure_ascii=False, indent=JSON_INDENT_LEVEL)

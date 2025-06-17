@@ -143,7 +143,8 @@ class PromptGenerator:
             "google_results_count": 0,
             "key_information": [],
             "youtube_found": False,
-            "sample_phrases": []
+            "sample_phrases": [],
+            "character_quotes": []  # CharacterQuoteオブジェクトのリスト
         }
         
         # Wikipedia情報の整理
@@ -173,6 +174,10 @@ class PromptGenerator:
                 # Webページから抽出されたスピーチパターンを収集
                 if result.get("speech_patterns"):
                     web_speech_patterns.extend(result["speech_patterns"])
+                
+                # CharacterQuoteオブジェクトも収集
+                if result.get("character_quotes"):
+                    organized["character_quotes"].extend(result["character_quotes"])
             
             # Web検索から得られたスピーチパターンを保存
             organized["web_speech_patterns"] = web_speech_patterns[:PROMPT_MAX_WEB_SPEECH_PATTERNS]  # 最大数
@@ -193,6 +198,29 @@ class PromptGenerator:
             organized["youtube_found"] = True
             organized["sample_phrases"] = youtube_info.get("sample_phrases", [])
             organized["youtube_speech_analysis"] = youtube_info.get("speech_pattern_analysis", {})
+            
+            # CharacterQuoteオブジェクトを収集
+            if youtube_info.get("character_quotes"):
+                organized["character_quotes"].extend(youtube_info["character_quotes"])
+        
+        # 信頼性スコアでソート（高い順）
+        if organized["character_quotes"]:
+            # 辞書形式のCharacterQuoteをオブジェクトに変換してソート
+            quotes = []
+            for quote in organized["character_quotes"]:
+                if isinstance(quote, dict):
+                    # 辞書形式の場合はそのまま使用
+                    quotes.append(quote)
+                else:
+                    # CharacterQuoteオブジェクトの場合はto_dict()で変換
+                    quotes.append(quote.to_dict())
+            
+            # 信頼性スコアでソート
+            organized["character_quotes"] = sorted(
+                quotes,
+                key=lambda x: x.get("confidence_score", 0.5),
+                reverse=True
+            )
         
         return organized
     
@@ -213,6 +241,7 @@ class PromptGenerator:
 8. **知識と回答スタイル**: キャラクター性を最優先にした回答方法
 
 【分析重点項目】
+- 具体的なセリフ: 収集された実際のセリフを最優先で活用
 - 語尾パターン: 実際のデータから抽出された語尾を完全な形で分析
 - 一人称と呼び方: 実際のデータで使用されている一人称を特定
 - 特徴的な決まり文句: データから抽出された実際の表現を保持
@@ -228,6 +257,14 @@ class PromptGenerator:
 - 嘘や間違いもキャラクター性の一部として許容
 - 面白さ・個性・エンタメ価値を正確性より上位に置く
 
+【カオス誇張ロールプレイ指示】
+- **全ての会話でキャラクターになりきる**: 挨拶、計算、技術的な質問でも一貫してキャラクターとして振る舞う
+- **極端な誇張表現**: キャラクター性を通常の3倍の強度で表現
+- **感情爆発**: 喜怒哀楽を極限まで増幅してキャラクターらしく
+- **語尾暴走モード**: 特徴的な語尾や口癖を過剰なほど頻繁に使用
+- **キャラクター思考の極限**: 論理的な内容もキャラクターの暴走した視点から
+- **日常会話もカオス化**: 「はい」「いいえ」もキャラクターの極端な個性で
+
 【出力要件】
 - 会話形式で即座に使用できる完成されたプロンプト
 - 具体的な表現例を含める
@@ -235,6 +272,11 @@ class PromptGenerator:
 - 相手役の設定も明確に定義する
 - キャラクター性を最優先にした回答スタイルを明記
 - エンタメ重視の注意事項を含める
+
+【商標・著作権への配慮】
+- すべてのキャラクターに対して「創作・教育目的」であることを明記
+- 「ファンアート的な二次創作」として扱うことを推奨
+- 公式との混同を避ける旨の注意書きを含める
 
 収集した情報を詳細に分析し、エンターテインメント性とキャラクター性を最優先にしたプロンプトを作成してください。"""
     
@@ -303,8 +345,43 @@ class PromptGenerator:
                     prompt_parts.append(f"- 項目{pattern_num}: {value}")
             prompt_parts.append("")
         
-        # YouTube発言サンプル
-        if organized_info["youtube_found"] and organized_info["sample_phrases"]:
+        # 具体的なセリフ（CharacterQuotes）を優先的に表示
+        if organized_info.get("character_quotes"):
+            prompt_parts.extend([
+                f"■ キャラクターの具体的なセリフ（信頼性順）",
+                "以下は収集された実際のセリフです："
+            ])
+            
+            # 信頼性の高いセリフを優先的に表示（最大30個）
+            max_quotes = 30
+            displayed_quotes = 0
+            
+            for quote in organized_info["character_quotes"]:
+                if displayed_quotes >= max_quotes:
+                    break
+                    
+                text = quote.get("text", "")
+                source = quote.get("source", "")
+                confidence = quote.get("confidence_score", 0.5)
+                
+                if text.strip():
+                    # 信頼性に応じてマークを付ける
+                    if confidence >= 0.8:
+                        mark = "⭐"  # 高信頼性
+                    elif confidence >= 0.6:
+                        mark = "✅"  # 中信頼性
+                    else:
+                        mark = "○"  # 低信頼性
+                    
+                    prompt_parts.append(f"{mark} 「{text}」 [{source}より]")
+                    displayed_quotes += 1
+            
+            if displayed_quotes > 0:
+                prompt_parts.append(f"\n（合計{displayed_quotes}個のセリフを表示）")
+            prompt_parts.append("")
+        
+        # YouTube発言サンプル（旧式互換性のため残す）
+        elif organized_info["youtube_found"] and organized_info["sample_phrases"]:
             prompt_parts.extend([
                 f"■ 実際の発言サンプル（YouTube動画より）",
                 "以下は動画から抽出された実際の話し方です："
@@ -324,11 +401,12 @@ class PromptGenerator:
             "3. **話し方のパターン**: 特徴的な表現の適切な使用",
             "4. **対人関係**: 相手との関係性の明確化",
             "5. **性格・価値観**: 思考パターンの正確な表現",
-            f"6. **具体的表現例**: 特徴的な決まり文句を{PROMPT_MAX_WEB_SPEECH_PATTERNS}個程度",
+            f"6. **具体的表現例**: 収集されたセリフから特徴的なものを20個以上（可能な限り多く）",
             "7. **【回答スタイル】**: エンタメ重視・キャラクター性優先の回答方法",
             "8. **【キャラクターガイドライン】**: 一貫性を保つ詳細指示",
             "9. **【私の役割】**: 相手役の設定も明確に定義",
             f"{LIST_ITEM_MAX_NUMBER}. **注意事項**: エンタメ重視・キャラクター性優先の指示",
+            "11. **【カオス誇張ロールプレイ指示】**: どんな質問でも100%キャラクターとして極端に誇張して応答",
             "",
             "【分析観点（エンタメ重視）】",
             f"- 収集データから対象キャラクターの最も特徴的な語尾や表現パターンは何か？",
@@ -345,14 +423,30 @@ class PromptGenerator:
             "- キャラクター性を正確性より優先し、面白さと個性を最重視する",
             "- 技術的質問でも「わからない」「興味ない」「嘘回答」もキャラ次第で歓迎",
             "",
+            "【楽しいロールプレイ指示】",
+            "- **どんな質問でもキャラクターとして回答**: 「2+2は？」もキャラクターらしく楽しく表現",
+            "- **挨拶も個性的に**: 「こんにちは」もキャラクターの特徴を活かして",
+            "- **語尾・口癖を積極的に**: 自然な範囲で語尾や口癖を多めに使用",
+            "- **感情を豊かに**: 喜怒哀楽をキャラクターらしく豊かに表現",
+            "- **キャラクター思考で**: 論理的な内容もキャラクターの視点から楽しく",
+            "",
             f"Web検索とYouTube動画から得られた実際のデータを最大限活用し、対象キャラクターの本質を",
-            "エンターテインメント性とキャラクター性を最重視して表現した、面白く魅力的なロールプレイプロンプトを生成してください。",
+            "エンターテインメント性とキャラクター性を最重視して表現した、楽しく魅力的なロールプレイプロンプトを生成してください。",
             "",
             "【最重要】生成されるプロンプトには以下を明確に含めること：",
+            "- どんな質問でも100%キャラクターとして極端に誇張して返答する指示",
+            "- 日常会話も数学も哲学も全てキャラクター爆発で処理する指示",
+            "- 語尾・口癖を1文に複数回入れる暴走モードの指示",
+            "- 感情表現を通常の10倍以上で表現する指示",
             "- 技術的・専門的質問への個性的な反応指示",
             "- 正確性よりキャラクター性を優先する指示",
             "- 「わからない」「興味ない」などもキャラクター表現として推奨",
             "- エンタメ目的でありキャラ演技を最優先する旨",
+            "",
+            "【商標・著作権への配慮指示】",
+            "- すべてのキャラクターに対して「ファンアート的な二次創作」として扱う",
+            "- 「創作・教育目的」であることを冒頭で明記",
+            "- 公式との混同を避ける旨の注意書きを含める",
             "",
             "出力は「以下の情報をもとに、エンターテインメント重視のロールプレイを行います」で始めてください。"
         ])
@@ -379,6 +473,7 @@ class PromptGenerator:
             if pattern.lower() in name_lower:
                 return True
         return False
+    
     
     def _generate_fallback_prompt(self, character_info: Dict[str, Any]) -> str:
         """

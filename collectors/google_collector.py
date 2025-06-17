@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse
 from googlesearch import search
 
-from core.interfaces import SearchEngineCollector, CollectionResult, SearchResult
+from core.interfaces import SearchEngineCollector, CollectionResult, SearchResult, CharacterQuote
 from core.exceptions import SearchEngineError
 from utils.api_client import OpenAIClient
 from utils.execution_logger import ExecutionLogger
@@ -574,10 +574,23 @@ class GoogleCollector(SearchEngineCollector):
             
             # 口調・セリフ関連の文をChatGPT APIで抽出（API keyがある場合のみ）
             speech_patterns = []
+            character_quotes = []
             if api_key and len(body_text.strip()) > GOOGLE_MIN_TEXT_LENGTH_FOR_API:  # 十分なテキストがある場合のみ
                 try:
                     openai_client = OpenAIClient(api_key)
                     speech_patterns = openai_client.extract_speech_patterns(body_text, character_name, logger)
+                    
+                    # 具体的なセリフも抽出
+                    quotes = openai_client.extract_character_quotes(
+                        body_text, 
+                        character_name, 
+                        source="web",
+                        source_url=url,
+                        logger=logger
+                    )
+                    # 辞書形式に変換してから追加（JSON保存のため）
+                    character_quotes.extend([quote.to_dict() for quote in quotes])
+                    
                 except Exception as api_error:
                     print(f"    API抽出スキップ ({domain}): {api_error}")
                     if logger:
@@ -588,8 +601,9 @@ class GoogleCollector(SearchEngineCollector):
                             "content_length": len(body_text)
                         })
                     speech_patterns = []
+                    character_quotes = []
             
-            return {
+            result = {
                 "url": url,
                 "domain": domain,
                 "title": title_text,
@@ -598,6 +612,12 @@ class GoogleCollector(SearchEngineCollector):
                 "content_length": len(body_text),
                 "speech_patterns": speech_patterns
             }
+            
+            # CharacterQuoteがある場合は追加
+            if character_quotes:
+                result["character_quotes"] = character_quotes
+            
+            return result
             
         except requests.RequestException as e:
             print(f"HTTP取得エラー ({url}): {e}")

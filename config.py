@@ -32,9 +32,9 @@ GOOGLE_CX = os.environ.get("GOOGLE_CX", "")
 
 # Google検索設定
 GOOGLE_RESULTS = 10  # 検索結果数を調整（20 → 10に減らして高速化）
-GOOGLE_API_RESULTS = 3  # Google Custom Search API での取得件数（8 → 3に減らして高速化）
-GOOGLE_DELAY = 15.0  # 遅延時間を増加（429エラー対策）
-GOOGLE_PAGE_LIMIT = 1000
+GOOGLE_API_RESULTS = 5  # Google Custom Search API での取得件数（8 → 3に減らして高速化）
+GOOGLE_DELAY = 10.0  # 遅延時間を増加（429エラー対策）
+GOOGLE_PAGE_LIMIT = 4000  # ページ内容の取得文字数を増加（1000→5000）
 
 # YouTube検索設定
 YOUTUBE_MAX_URLS = 20
@@ -105,7 +105,7 @@ CHATGPT_MAX_KEYWORDS = 5
 GOOGLE_FALLBACK_DELAY_MULTIPLIER = 4  # 429エラー対策で増加
 GOOGLE_MIN_DELAY = 20.0  # 429エラー対策で増加
 GOOGLE_URL_FETCH_DELAY = 3.0  # ページ取得間隔を増加
-GOOGLE_FETCH_PAGE_CONTENT = False  # ページコンテンツ取得を無効化（高速化）
+GOOGLE_FETCH_PAGE_CONTENT = True  # ページコンテンツ取得を有効化
 GOOGLE_PAGE_DELAY_MULTIPLIER = 3  # ページ取得時の追加待機を増加
 GOOGLE_YOUTUBE_DELAY_MULTIPLIER = 5  # YouTube検索時の追加待機を増加
 GOOGLE_CX_DISPLAY_LENGTH = 10
@@ -161,6 +161,7 @@ PROMPT_INTRODUCTION_CHAR_LIMIT = 200
 PROMPT_INTRODUCTION_MAX_TOKENS = 300
 PROMPT_INTRODUCTION_TEMPERATURE = 0.8
 PROMPT_POLICY_SAFE_TEMPERATURE = 0.3
+PROMPT_MAX_CHARACTER_QUOTES = 30  # プロンプトに含める最大セリフ数
 
 # ==============================================================================
 # API処理設定
@@ -169,6 +170,8 @@ PROMPT_POLICY_SAFE_TEMPERATURE = 0.3
 # API処理設定
 API_PROMPT_SLICE_LENGTH = 200
 API_MAX_EXTRACTED_PATTERNS = 10
+API_MAX_EXTRACTED_QUOTES = 10  # 1回のAPIコールで抽出する最大セリフ数
+API_MIN_QUOTE_LENGTH = 5  # セリフの最小文字数
 
 # ==============================================================================
 # 表示フォーマット設定
