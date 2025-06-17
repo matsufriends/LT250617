@@ -29,10 +29,9 @@
 - **googlesearch-python** - Google検索（フォールバック用）
 - **youtube-transcript-api** - YouTube字幕取得
 
-### 新規追加ユーティリティ
-- **timing.py** - 時間計測とパフォーマンス分析
+### ユーティリティ
 - **api_client.py** - OpenAI API専用クライアント
-- **text_processor.py** - テキスト処理・パターン抽出
+- **execution_logger.py** - 実行ログとパフォーマンス分析
 - **http_client.py** - 共通HTTP通信基盤
 
 ## 📐 システム設計
@@ -56,7 +55,7 @@
 │ YouTubeCollector | DuckDuckGoCollector │
 ├─────────────────────────────────────┤
 │        Utils & Common Services      │  ← 共通サービス層
-│ api_client | text_processor | timing │
+│ api_client | execution_logger | http_client │
 └─────────────────────────────────────┘
 ```
 
@@ -79,30 +78,22 @@ graph TD
 
 ### 設定管理システム（config.py）
 
+定数ベースの設定管理に変更され、70以上の設定値が一元管理されています：
+
 ```python
-@dataclass
-class APIConfig:
-    """API関連設定"""
-    openai_model: str = "gpt-4o"
-    openai_max_tokens: int = 4000
-    openai_temperature: float = 0.7
-    google_api_key: str = ""
-    google_cx: str = ""
-    
-@dataclass
-class SearchConfig:
-    """検索関連設定"""
-    google_delay: float = 6.0
-    google_results: int = 15
-    youtube_max_urls: int = 20
-    
-@dataclass
-class AppConfig:
-    """アプリケーション統合設定"""
-    api: APIConfig
-    search: SearchConfig
-    collector: CollectorConfig
-    processing: ProcessingConfig
+# API関連
+OPENAI_MODEL = "gpt-4o"
+OPENAI_MAX_TOKENS = 4000
+OPENAI_TEMPERATURE = 0.7
+
+# 検索関連
+GOOGLE_DELAY = 10.0  # レート制限対策で増加
+GOOGLE_RESULTS = 10  # 取得件数を最適化
+GOOGLE_PAGE_LIMIT = 4000  # ページ内容取得を拡大
+
+# YouTube関連
+YOUTUBE_MAX_URLS = 20
+YOUTUBE_MAX_TRANSCRIPTS = 10
 ```
 
 ### サービス層（CharacterInfoService）
@@ -184,6 +175,15 @@ class CollectionResult:
     query: Optional[str] = None
     source: Optional[str] = None
     duration: Optional[float] = None
+
+@dataclass
+class CharacterQuote:
+    """キャラクターのセリフを管理"""
+    text: str
+    source: str  # "web", "youtube", "wikipedia"
+    source_url: Optional[str] = None
+    confidence_score: float = 0.5  # 0.0-1.0の信頼性スコア
+    context: Optional[str] = None
 
 class BaseCollector(ABC):
     """すべてのコレクターの基底クラス"""
@@ -268,15 +268,24 @@ class OpenAIClient:
         logger: Optional[ExecutionLogger] = None
     ) -> Dict[str, Any]:
         response = self.client.chat.completions.create(
-            model=model or config.api.openai_model,
+            model=model or OPENAI_MODEL,
             messages=messages,
-            max_tokens=config.api.openai_max_tokens,
-            temperature=config.api.openai_temperature
+            max_tokens=OPENAI_MAX_TOKENS,
+            temperature=OPENAI_TEMPERATURE
         )
         
         # ログ記録とパフォーマンス計測
         if logger:
             logger.log_api_call(api_type, request_data, response_data, duration)
+    
+    def extract_character_quotes(
+        self, text: str, character_name: str, source: str = "unknown",
+        source_url: Optional[str] = None, logger: Optional[ExecutionLogger] = None
+    ) -> List[CharacterQuote]:
+        """テキストからキャラクターの具体的なセリフを抽出"""
+        # ChatGPT APIを使用して具体的なセリフを抽出
+        # 信頼性スコアを計算して付与
+        # CharacterQuoteオブジェクトとして返す
 ```
 
 ## 🎯 主要機能詳細
@@ -323,9 +332,6 @@ class CollectorError(CharacterPromptError):
 class SearchEngineError(CollectorError):
     """検索エンジンエラー"""
 
-class RateLimitError(SearchEngineError):
-    """レート制限エラー"""
-
 class APIError(CharacterPromptError):
     """API呼び出しエラー"""
 ```
@@ -346,23 +352,6 @@ class ExecutionLogger:
         """パフォーマンス指標を記録"""
 ```
 
-### 時間計測ユーティリティ
-```python
-# utils/timing.py
-@contextmanager
-def timer():
-    """コンテキストマネージャーでの時間計測"""
-    timer_result = TimerResult()
-    try:
-        yield timer_result
-    finally:
-        timer_result.stop()
-
-# 使用例
-with timer() as t:
-    result = collector.collect_info(name)
-logger.log_performance_metric("collection_duration", t.duration, "seconds")
-```
 
 ## 🔍 詳細ログ・分析機能
 
@@ -402,16 +391,24 @@ logger.log_performance_metric("collection_duration", t.duration, "seconds")
 2. **ポリシー対応版プロンプト** - ChatGPTカスタム指示で安全使用
 3. **キャラクター自己紹介** - 生成プロンプトでの実演
 
-### 誇張表現の実装
+### カオス誇張モードの実装
 ```python
 # プロンプト生成時の指示
-system_prompt = """
-キャラクター特徴を通常の3倍の強度で表現してください：
-- 語尾や口癖を過剰なほど頻繁に使用
-- 感情表現は常に大袈裟で激しく
-- 「普通」「標準的」「控えめ」な表現は禁止
-- キャラクター性を薄めることなく、むしろ濃厚に描写
-"""
+【カオス誇張ロールプレイ指示】
+- 全ての会話でキャラクターになりきる
+- 極端な誇張表現：キャラクター性を通常の3倍の強度で表現
+- 感情爆発：喜怒哀楽を極限まで増幅
+- 語尾暴走モード：特徴的な語尾や口癖を過剰なほど頻繁に使用
+- キャラクター思考の極限：論理的な内容もキャラクターの暴走した視点から
+- 日常会話もカオス化：「はい」「いいえ」もキャラクターの極端な個性で
+```
+
+### 商標・著作権への配慮
+```python
+【商標・著作権への配慮】
+- すべてのキャラクターに対して「創作・教育目的」であることを明記
+- 「ファンアート的な二次創作」として扱うことを推奨
+- 公式との混同を避ける旨の注意書きを含める
 ```
 
 ## 🔧 開発者向け情報
@@ -465,19 +462,33 @@ result = service.collect_character_info(
            # 新しい処理ロジック
    ```
 
-## 📈 パフォーマンス指標
+## 📈 最新の改善点
 
-### 計測項目
-- **Wikipedia収集時間**: 平均 1-3秒
-- **Web検索時間**: 平均 10-30秒（検索エンジンにより変動）
-- **YouTube字幕収集**: 平均 15-45秒
-- **プロンプト生成**: 平均 5-15秒
-- **総実行時間**: 平均 30-90秒
+### 2024年12月の主要アップデート
+1. **CharacterQuote機能追加**
+   - Web/YouTubeから具体的なセリフを抽出
+   - 信頼性スコア（0.0-1.0）で品質管理
+   - 最大30個のセリフをプロンプトに含める
 
-### 最適化ポイント
-1. **ChatGPT検索使用**: Web検索をスキップして高速化
-2. **YouTube無効化**: 字幕収集をスキップして大幅高速化
-3. **Google Custom Search API**: レート制限回避で安定化
+2. **カオス誇張モード実装**
+   - キャラクター性を通常の3倍の強度で表現
+   - 語尾暴走モード（1文に複数回語尾を混入）
+   - 感情表現を10倍に増幅
+
+3. **商標・著作権対応**
+   - すべてのキャラクターに対して二次創作として扱う
+   - 「創作・教育目的」を明記
+   - 公式との混同を避ける注意書き
+
+4. **設定管理の簡素化**
+   - Dataclassから定数ベースに変更
+   - 70以上のマジックナンバーを一元管理
+   - 環境変数との統合
+
+5. **パフォーマンス最適化**
+   - Google検索の遅延時間を10秒に増加（429エラー対策）
+   - 検索結果数を10件に最適化
+   - ページ内容取得を4000文字に拡大
 
 ## 🔒 セキュリティ考慮事項
 
