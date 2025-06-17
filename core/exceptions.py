@@ -39,21 +39,8 @@ class SearchEngineError(CollectorError):
     pass
 
 
-class RateLimitError(SearchEngineError):
-    """レート制限エラー"""
-    
-    def __init__(self, message: str, retry_after: Optional[int] = None, **kwargs):
-        super().__init__(message, **kwargs)
-        self.retry_after = retry_after
-
-
 class WikipediaError(CollectorError):
     """Wikipedia関連の例外"""
-    pass
-
-
-class YouTubeError(CollectorError):
-    """YouTube関連の例外"""
     pass
 
 
@@ -67,6 +54,3 @@ class ConfigurationError(CharacterPromptError):
     pass
 
 
-class ValidationError(CharacterPromptError):
-    """バリデーション関連の例外"""
-    pass

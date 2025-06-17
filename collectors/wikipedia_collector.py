@@ -14,7 +14,6 @@ from config import (
     SAMPLE_PHRASES_MAX,
     MULTIPLIER_DOUBLE
 )
-from utils.text_processor import TextProcessor
 from utils.execution_logger import ExecutionLogger
 
 
