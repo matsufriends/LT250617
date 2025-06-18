@@ -18,7 +18,7 @@ export GOOGLE_API_KEY="your-google-api-key"
 export GOOGLE_CX="your-search-engine-id"
 ```
 
-Google API設定方法は `GOOGLE_SETUP.md` を参照してください。
+Google API設定方法は [`GOOGLE_SETUP.md`](GOOGLE_SETUP.md) を参照してください。
 
 ## 使い方
 
@@ -45,12 +45,12 @@ python main.py "ピカチュウ" --no-youtube
 
 ## トラブルシューティング
 
-- **Google API設定エラー**: `GOOGLE_SETUP.md` を参照して設定
+- **Google API設定エラー**: [`GOOGLE_SETUP.md`](GOOGLE_SETUP.md) を参照して設定
 - **レート制限エラー**: `--use-chatgpt-search` を使用
 - **API Keyエラー**: 環境変数 `OPENAI_API_KEY` を設定
 - **検索結果なし**: キャラクター名の表記を変更
 
 ## 詳細情報
 
-- 技術仕様: `CLAUDE.md`
-- Google API設定: `GOOGLE_SETUP.md`
+- 技術仕様: [`CLAUDE.md`](CLAUDE.md)
+- Google API設定: [`GOOGLE_SETUP.md`](GOOGLE_SETUP.md)
