@@ -12,26 +12,32 @@ pip install -r requirements.txt
 
 # API Key設定（必須）
 export OPENAI_API_KEY="your-openai-api-key"
+
+# Google API設定（推奨）
+export GOOGLE_API_KEY="your-google-api-key"
+export GOOGLE_CX="your-search-engine-id"
 ```
+
+Google API設定方法は `GOOGLE_SETUP.md` を参照してください。
 
 ## 使い方
 
 ```bash
-# 基本（推奨）
-python main.py "ドラえもん" --use-chatgpt-search
+# 基本（Google API使用）
+python main.py "ドラえもん"
 
-# 高速実行
-python main.py "初音ミク" --use-chatgpt-search --no-youtube
+# ChatGPT知識ベース使用（Google API未設定時の代替）
+python main.py "初音ミク" --use-chatgpt-search
 
-# Google API使用（要設定）
-python main.py "ピカチュウ"
+# 高速実行（YouTube無効）
+python main.py "ピカチュウ" --no-youtube
 ```
 
 ## オプション
 
 | オプション | 説明 |
 |------------|------|
-| `--use-chatgpt-search` | ChatGPT検索（レート制限なし） |
+| `--use-chatgpt-search` | ChatGPT検索（Google API未設定時の代替） |
 | `--use-bing` | Bing検索を使用 |
 | `--use-duckduckgo` | DuckDuckGo検索を使用 |
 | `--no-youtube` | YouTube字幕取得を無効化 |
@@ -39,7 +45,8 @@ python main.py "ピカチュウ"
 
 ## トラブルシューティング
 
-- **検索レート制限エラー**: `--use-chatgpt-search` を使用
+- **Google API設定エラー**: `GOOGLE_SETUP.md` を参照して設定
+- **レート制限エラー**: `--use-chatgpt-search` を使用
 - **API Keyエラー**: 環境変数 `OPENAI_API_KEY` を設定
 - **検索結果なし**: キャラクター名の表記を変更
 
